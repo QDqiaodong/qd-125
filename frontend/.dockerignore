@@ -1,0 +1,41 @@
+# 构建产物
+dist/
+build/
+
+# 依赖目录（容器内重新安装）
+node_modules/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE 配置
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 日志与临时文件
+*.log
+logs/
+*.tmp
+
+# 文档与脚本（不需要进镜像）
+*.md
+docker/
+docs/
+screenshots/
+
+# Docker 自身文件
+Dockerfile
+.dockerignore
+
+# 本地环境配置
+.env
+.env.local

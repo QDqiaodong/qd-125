@@ -1,0 +1,111 @@
+# ====================================================================
+# 输送设备缓冲挡块跨产线移交划转系统 - Docker Compose 编排
+# ====================================================================
+# 约束：
+#   1. 所有镜像统一引用 ${DOCKER_REGISTRY} 前缀，规避 DockerHub 直连失败
+#   2. 所有宿主机端口绑定 IPv4 回环 127.0.0.1，端口从 .env 读取
+#   3. 容器命名带项目前缀 ${COMPOSE_PROJECT_NAME}
+#   4. 不使用 # syntax=docker/dockerfile:* 指令，仅依赖原生分层缓存
+# ====================================================================
+
+services:
+  mysql:
+    image: ${DOCKER_REGISTRY}/mysql:8.0
+    container_name: ${COMPOSE_PROJECT_NAME}-mysql
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MYSQL_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - buffer-net
+
+  redis:
+    image: ${DOCKER_REGISTRY}/redis:7.2
+    container_name: ${COMPOSE_PROJECT_NAME}-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REDIS_PORT}:6379"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - redis-data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - buffer-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY}
+    image: ${COMPOSE_PROJECT_NAME}-backend:latest
+    container_name: ${COMPOSE_PROJECT_NAME}-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${BACKEND_PORT}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      TZ: Asia/Shanghai
+      JAVA_OPTS: ${JAVA_OPTS}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - buffer-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY: ${DOCKER_REGISTRY}
+    image: ${COMPOSE_PROJECT_NAME}-frontend:latest
+    container_name: ${COMPOSE_PROJECT_NAME}-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT}:80"
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      - backend
+    networks:
+      - buffer-net
+
+volumes:
+  mysql-data:
+    name: ${COMPOSE_PROJECT_NAME}-mysql-data
+  redis-data:
+    name: ${COMPOSE_PROJECT_NAME}-redis-data
+
+networks:
+  buffer-net:
+    name: ${COMPOSE_PROJECT_NAME}-net
+    driver: bridge
