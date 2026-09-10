@@ -2,6 +2,10 @@
 -- 移交确认业务模块升级脚本（存量库迁移，幂等可重复执行）
 -- 全新部署时 schema.sql 已包含全部结构，本脚本执行结果为空操作；
 -- 存量部署可手动执行：mysql -uroot -p buffer_block_db < z_V2_transfer_confirm.sql
+--
+-- 说明：/docker-entrypoint-initdb.d 仅在 MySQL 数据目录为空时执行，
+--       存量数据卷升级无需手动执行本脚本——新版后端启动时会通过
+--       TransferConfirmSchemaMigration 自动完成等价的幂等迁移。
 -- ====================================================================
 
 USE buffer_block_db;
@@ -65,22 +69,8 @@ CALL idx_block_transfer_status();
 DROP PROCEDURE IF EXISTS idx_block_transfer_status;
 
 -- --------------------------------------------------------------------
--- 历史移交单：升级前登记的单据均已即时绑定，按已确认回填
--- （全新部署时种子数据自带 CONFIRMED/REJECTED 状态，此处影响 0 行；
---   存量库升级窗口内、新版应用启动前，PENDING + 未处理的单据只可能是旧单）
--- --------------------------------------------------------------------
-UPDATE block_transfer
-SET status = 'CONFIRMED',
-    handle_note = COALESCE(handle_note, CONCAT('历史数据迁移：原流程已完成移交', IFNULL(CONCAT('（', remark, '）'), ''))),
-    handle_time = COALESCE(handle_time, update_time)
-WHERE status = 'PENDING' AND handle_time IS NULL;
-
--- 兜底：任何遗漏的旧记录均视为已确认，避免错误地出现在待确认列表
-UPDATE block_transfer SET status = 'CONFIRMED'
-WHERE status IS NULL OR status = '';
-
--- --------------------------------------------------------------------
--- 流转记录表
+-- 流转记录表（需先于下面的历史数据回填创建，回填通过 REGISTER 记录
+--   区分“历史单据”与“新流程待确认单据”）
 -- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS transfer_flow_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -95,15 +85,36 @@ CREATE TABLE IF NOT EXISTS transfer_flow_record (
     INDEX idx_action (action)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='移交确认流转记录';
 
--- 为历史移交单补登记+处理两条流转记录（仅当该单尚无任何流转记录时补登记）
+-- --------------------------------------------------------------------
+-- 历史移交单：升级前没有流转记录表，旧流程登记即完成产线绑定。
+-- 仅回填“尚无 REGISTER 流转记录”的历史单据为已确认；
+-- 新流程已登记、待接收方处理的单据（已有 REGISTER 记录）保持 PENDING，
+-- 不会被错误地置为已确认。
+-- （全新部署时种子数据自带 CONFIRMED/REJECTED 状态，此处影响 0 行）
+-- --------------------------------------------------------------------
+UPDATE block_transfer t
+SET t.status = 'CONFIRMED',
+    t.handle_note = COALESCE(t.handle_note, CONCAT('历史数据迁移：原流程已完成移交', IFNULL(CONCAT('（', t.remark, '）'), ''))),
+    t.handle_time = COALESCE(t.handle_time, t.update_time)
+WHERE (t.status IS NULL OR t.status = '' OR t.status = 'PENDING')
+  AND NOT EXISTS (SELECT 1 FROM transfer_flow_record r
+                  WHERE r.transfer_id = t.id AND r.action = 'REGISTER');
+
+-- 兜底：任何遗漏的空状态旧记录均视为已确认，避免错误地出现在待确认列表
+UPDATE block_transfer SET status = 'CONFIRMED'
+WHERE status IS NULL OR status = '';
+
+-- --------------------------------------------------------------------
+-- 为历史移交单补登流转记录（按 transfer + action 幂等，可重复执行）
+-- --------------------------------------------------------------------
 INSERT INTO transfer_flow_record (transfer_id, action, from_status, to_status, operator, note, create_time)
 SELECT t.id, 'REGISTER', NULL, 'PENDING', t.transfer_operator, '移交登记，等待接收方确认', t.create_time
 FROM block_transfer t
-WHERE NOT EXISTS (SELECT 1 FROM transfer_flow_record r WHERE r.transfer_id = t.id);
+WHERE NOT EXISTS (SELECT 1 FROM transfer_flow_record r WHERE r.transfer_id = t.id AND r.action = 'REGISTER');
 
 INSERT INTO transfer_flow_record (transfer_id, action, from_status, to_status, operator, note, create_time)
 SELECT t.id, 'CONFIRM', 'PENDING', 'CONFIRMED',
-       COALESCE(t.receive_operator, t.transfer_operator),
+       COALESCE(NULLIF(t.receive_operator, ''), t.transfer_operator),
        COALESCE(t.handle_note, '历史数据迁移：确认接收'), t.handle_time
 FROM block_transfer t
 WHERE t.status = 'CONFIRMED'
@@ -111,7 +122,7 @@ WHERE t.status = 'CONFIRMED'
 
 INSERT INTO transfer_flow_record (transfer_id, action, from_status, to_status, operator, note, create_time)
 SELECT t.id, 'REJECT', 'PENDING', 'REJECTED',
-       COALESCE(t.receive_operator, t.transfer_operator),
+       COALESCE(NULLIF(t.receive_operator, ''), t.transfer_operator),
        COALESCE(t.handle_note, '历史数据迁移：驳回'), t.handle_time
 FROM block_transfer t
 WHERE t.status = 'REJECTED'

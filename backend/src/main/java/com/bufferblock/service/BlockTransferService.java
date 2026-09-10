@@ -20,7 +20,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class BlockTransferService {
@@ -30,7 +29,16 @@ public class BlockTransferService {
     private final BufferBlockService bufferBlockService;
     private final ProductionLineService productionLineService;
 
-    private final AtomicInteger dailyCounter = new AtomicInteger(0);
+    private static final DateTimeFormatter TRANSFER_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /**
+     * 当日序号内存缓存（与库内当日最大序号对齐）。
+     * 重启后首次发号会重新读取数据库，避免旧实现重启归零撞 transfer_no 唯一键。
+     * key=yyyyMMdd，value=已分配的最大序号。
+     */
+    private volatile String dailyCounterDate = "";
+    private int dailyCounter = 0;
+    private final Object dailyCounterLock = new Object();
 
     public BlockTransferService(BlockTransferRepository blockTransferRepository,
                                 TransferFlowRecordRepository transferFlowRecordRepository,
@@ -184,7 +192,7 @@ public class BlockTransferService {
     public BlockTransfer markPrinted(Long id) {
         BlockTransfer transfer = blockTransferRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("移交记录不存在"));
-        transfer.setPrintCount(transfer.getPrintCount() + 1);
+        transfer.setPrintCount((transfer.getPrintCount() == null ? 0 : transfer.getPrintCount()) + 1);
         transfer.setLastPrintTime(LocalDateTime.now());
         transfer = blockTransferRepository.save(transfer);
 
@@ -244,8 +252,17 @@ public class BlockTransferService {
     }
 
     private String generateTransferNo() {
-        String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        int seq = dailyCounter.incrementAndGet();
+        String dateStr = LocalDate.now().format(TRANSFER_NO_DATE);
+        String prefix = String.format("TRF-%s-", dateStr);
+        int seq;
+        synchronized (dailyCounterLock) {
+            if (!dateStr.equals(dailyCounterDate)) {
+                Integer maxSeq = blockTransferRepository.findMaxDailySequence(prefix);
+                dailyCounter = maxSeq != null ? maxSeq : 0;
+                dailyCounterDate = dateStr;
+            }
+            seq = ++dailyCounter;
+        }
         return String.format("TRF-%s-%03d", dateStr, seq);
     }
 
