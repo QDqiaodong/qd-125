@@ -12,6 +12,10 @@ import java.time.LocalDateTime;
 @Table(name = "block_transfer")
 public class BlockTransfer {
 
+    public static final String STATUS_PENDING = "PENDING";
+    public static final String STATUS_CONFIRMED = "CONFIRMED";
+    public static final String STATUS_REJECTED = "REJECTED";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -43,11 +47,26 @@ public class BlockTransfer {
     @Column(name = "remark", length = 500)
     private String remark;
 
+    @Column(name = "status", nullable = false, length = 20)
+    private String status = STATUS_PENDING;
+
+    @Column(name = "handle_note", length = 500)
+    private String handleNote;
+
+    @Column(name = "handle_time")
+    private LocalDateTime handleTime;
+
     @Column(name = "print_count")
     private Integer printCount = 0;
 
     @Column(name = "last_print_time")
     private LocalDateTime lastPrintTime;
+
+    @Column(name = "receipt_print_count")
+    private Integer receiptPrintCount = 0;
+
+    @Column(name = "last_receipt_print_time")
+    private LocalDateTime lastReceiptPrintTime;
 
     @CreationTimestamp
     @Column(name = "create_time", updatable = false)
@@ -67,10 +86,16 @@ public class BlockTransfer {
     private BigDecimal thickness;
 
     @Transient
+    private String specTemplate;
+
+    @Transient
     private String fromLineName;
 
     @Transient
     private String toLineName;
+
+    @Transient
+    private String waitingDuration;
 
     public BlockTransfer() {
     }
@@ -105,11 +130,26 @@ public class BlockTransfer {
     public String getRemark() { return remark; }
     public void setRemark(String remark) { this.remark = remark; }
 
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public String getHandleNote() { return handleNote; }
+    public void setHandleNote(String handleNote) { this.handleNote = handleNote; }
+
+    public LocalDateTime getHandleTime() { return handleTime; }
+    public void setHandleTime(LocalDateTime handleTime) { this.handleTime = handleTime; }
+
     public Integer getPrintCount() { return printCount; }
     public void setPrintCount(Integer printCount) { this.printCount = printCount; }
 
     public LocalDateTime getLastPrintTime() { return lastPrintTime; }
     public void setLastPrintTime(LocalDateTime lastPrintTime) { this.lastPrintTime = lastPrintTime; }
+
+    public Integer getReceiptPrintCount() { return receiptPrintCount; }
+    public void setReceiptPrintCount(Integer receiptPrintCount) { this.receiptPrintCount = receiptPrintCount; }
+
+    public LocalDateTime getLastReceiptPrintTime() { return lastReceiptPrintTime; }
+    public void setLastReceiptPrintTime(LocalDateTime lastReceiptPrintTime) { this.lastReceiptPrintTime = lastReceiptPrintTime; }
 
     public LocalDateTime getCreateTime() { return createTime; }
     public void setCreateTime(LocalDateTime createTime) { this.createTime = createTime; }
@@ -126,9 +166,15 @@ public class BlockTransfer {
     public BigDecimal getThickness() { return thickness; }
     public void setThickness(BigDecimal thickness) { this.thickness = thickness; }
 
+    public String getSpecTemplate() { return specTemplate; }
+    public void setSpecTemplate(String specTemplate) { this.specTemplate = specTemplate; }
+
     public String getFromLineName() { return fromLineName; }
     public void setFromLineName(String fromLineName) { this.fromLineName = fromLineName; }
 
     public String getToLineName() { return toLineName; }
     public void setToLineName(String toLineName) { this.toLineName = toLineName; }
+
+    public String getWaitingDuration() { return waitingDuration; }
+    public void setWaitingDuration(String waitingDuration) { this.waitingDuration = waitingDuration; }
 }

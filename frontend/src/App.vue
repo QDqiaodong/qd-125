@@ -31,6 +31,10 @@
             <el-icon><Switch /></el-icon>
             <span>移交台账管理</span>
           </el-menu-item>
+          <el-menu-item index="/transfer-confirm">
+            <el-icon><CircleCheck /></el-icon>
+            <span>移交确认</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main class="app-main">

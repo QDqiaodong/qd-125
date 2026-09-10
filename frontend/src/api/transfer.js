@@ -34,10 +34,44 @@ export function createTransfer(data) {
   })
 }
 
+/** 接收方确认接收 */
+export function confirmTransfer(id, data) {
+  return request({
+    url: `/transfers/${id}/confirm`,
+    method: 'post',
+    data
+  })
+}
+
+/** 接收方驳回 */
+export function rejectTransfer(id, data) {
+  return request({
+    url: `/transfers/${id}/reject`,
+    method: 'post',
+    data
+  })
+}
+
+/** 完整流转记录 */
+export function getTransferFlowRecords(id) {
+  return request({
+    url: `/transfers/${id}/flow-records`,
+    method: 'get'
+  })
+}
+
 export function markTransferPrinted(id) {
   return request({
     url: `/transfers/${id}/print`,
     method: 'post'
+  })
+}
+
+/** 打印确认回执 */
+export function markReceiptPrinted(id) {
+  return request({
+    url: `/transfers/${id}/receipt-print`,
+    method: 'post',
   })
 }
 

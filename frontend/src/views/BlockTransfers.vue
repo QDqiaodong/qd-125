@@ -79,6 +79,21 @@
         <el-table-column prop="toLineName" label="移入产线" show-overflow-tooltip />
         <el-table-column prop="transferDate" label="移交日期" width="120" />
         <el-table-column prop="transferOperator" label="移交人" width="100" />
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="scope">
+            <el-tag :type="statusMeta(scope.row.status).type" size="small" effect="light">
+              {{ statusMeta(scope.row.status).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="等待时长" width="120" align="center">
+          <template #default="scope">
+            <el-tag v-if="scope.row.status === 'PENDING'" type="danger" effect="plain" size="small">
+              {{ scope.row.waitingDuration }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="printCount" label="打印次数" width="90" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.printCount > 0 ? 'success' : 'info'" size="small">
@@ -173,7 +188,7 @@
           <el-input v-model="createForm.transferOperator" placeholder="请输入移交人姓名" />
         </el-form-item>
         <el-form-item label="接收人" prop="receiveOperator">
-          <el-input v-model="createForm.receiveOperator" placeholder="请输入接收人姓名" />
+          <el-input v-model="createForm.receiveOperator" placeholder="预填接收人姓名（可选，以确认时为准）" />
         </el-form-item>
         <el-form-item label="移交原因" prop="transferReason">
           <el-input
@@ -229,8 +244,10 @@
           <el-descriptions-item label="移交日期">
             {{ currentPrint?.transferDate }}
           </el-descriptions-item>
-          <el-descriptions-item label="打印次数">
-            第 {{ (currentPrint?.printCount || 0) + 1 }} 次
+          <el-descriptions-item label="确认状态">
+            <el-tag :type="statusMeta(currentPrint?.status).type" size="small">
+              {{ statusMeta(currentPrint?.status).text }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="移交人">
             {{ currentPrint?.transferOperator }}
@@ -241,8 +258,14 @@
           <el-descriptions-item label="移交原因" :span="2">
             {{ currentPrint?.transferReason || '-' }}
           </el-descriptions-item>
+          <el-descriptions-item v-if="currentPrint?.handleNote" label="处理说明" :span="2">
+            {{ currentPrint.handleNote }}
+          </el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">
             {{ currentPrint?.remark || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="打印次数">
+            第 {{ (currentPrint?.printCount || 0) + 1 }} 次
           </el-descriptions-item>
         </el-descriptions>
 
@@ -364,18 +387,23 @@ const handleReset = () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await queryTransfers(query)
-    let list = res.content
-    if (query.blockCode) {
-      list = list.filter(t => t.blockCode?.includes(query.blockCode))
-    }
-    tableData.value = list
+    const res = await queryTransfers({ ...query, blockCode: query.blockCode?.trim() || null })
+    tableData.value = res.content
     total.value = res.totalElements
   } catch (e) {
     ElMessage.error('加载数据失败')
   } finally {
     loading.value = false
   }
+}
+
+const statusMeta = (status) => {
+  const map = {
+    PENDING: { text: '待确认', type: 'warning' },
+    CONFIRMED: { text: '已确认', type: 'success' },
+    REJECTED: { text: '已驳回', type: 'danger' }
+  }
+  return map[status] || { text: status || '-', type: 'info' }
 }
 
 const openCreateDialog = async () => {
@@ -402,7 +430,7 @@ const submitCreateForm = async () => {
     if (!valid) return
     try {
       await createTransfer(createForm)
-      ElMessage.success('移交登记成功')
+      ElMessage.success('移交登记成功，等待接收方确认')
       createVisible.value = false
       await loadData()
     } catch (e) {

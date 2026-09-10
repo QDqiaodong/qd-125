@@ -20,6 +20,11 @@ const routes = [
     path: '/transfers',
     name: 'BlockTransfers',
     component: () => import('@/views/BlockTransfers.vue')
+  },
+  {
+    path: '/transfer-confirm',
+    name: 'TransferConfirm',
+    component: () => import('@/views/TransferConfirm.vue')
   }
 ]
 

@@ -7,7 +7,11 @@ public class TransferQueryDTO {
     private LocalDate endDate;
     private Long fromLineId;
     private Long toLineId;
+    /** 产线筛选：匹配移出或移入产线（移交确认列表使用） */
+    private Long lineId;
     private String blockCode;
+    /** 状态：PENDING-待确认, CONFIRMED-已确认, REJECTED-已驳回 */
+    private String status;
     private Integer page = 1;
     private Integer size = 10;
 
@@ -25,6 +29,12 @@ public class TransferQueryDTO {
 
     public Long getToLineId() { return toLineId; }
     public void setToLineId(Long toLineId) { this.toLineId = toLineId; }
+
+    public Long getLineId() { return lineId; }
+    public void setLineId(Long lineId) { this.lineId = lineId; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 
     public String getBlockCode() { return blockCode; }
     public void setBlockCode(String blockCode) { this.blockCode = blockCode; }

@@ -60,16 +60,35 @@ CREATE TABLE IF NOT EXISTS block_transfer (
     transfer_operator VARCHAR(50) NOT NULL COMMENT '移交操作人',
     receive_operator VARCHAR(50) DEFAULT NULL COMMENT '接收人',
     remark VARCHAR(500) DEFAULT NULL COMMENT '备注',
-    print_count INT DEFAULT 0 COMMENT '打印次数',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING-待确认, CONFIRMED-已确认, REJECTED-已驳回',
+    handle_note VARCHAR(500) DEFAULT NULL COMMENT '接收方处理说明',
+    handle_time DATETIME DEFAULT NULL COMMENT '接收方处理时间',
+    print_count INT DEFAULT 0 COMMENT '移交单打印次数',
     last_print_time DATETIME DEFAULT NULL COMMENT '最后打印时间',
+    receipt_print_count INT DEFAULT 0 COMMENT '确认回执打印次数',
+    last_receipt_print_time DATETIME DEFAULT NULL COMMENT '回执最后打印时间',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_transfer_no (transfer_no),
     INDEX idx_block_id (block_id),
     INDEX idx_transfer_date (transfer_date),
     INDEX idx_from_line (from_line_id),
-    INDEX idx_to_line (to_line_id)
+    INDEX idx_to_line (to_line_id),
+    INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='挡块跨产线移交记录';
+
+CREATE TABLE IF NOT EXISTS transfer_flow_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    transfer_id BIGINT NOT NULL COMMENT '移交单ID',
+    action VARCHAR(30) NOT NULL COMMENT '动作: REGISTER-登记, CONFIRM-确认, REJECT-驳回, PRINT_RECEIPT-打印回执, PRINT_ORDER-打印移交单',
+    from_status VARCHAR(20) DEFAULT NULL COMMENT '变更前状态',
+    to_status VARCHAR(20) DEFAULT NULL COMMENT '变更后状态',
+    operator VARCHAR(50) DEFAULT NULL COMMENT '操作人',
+    note VARCHAR(500) DEFAULT NULL COMMENT '处理说明/备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_transfer_id (transfer_id),
+    INDEX idx_action (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='移交确认流转记录';
 
 -- 幂等种子数据：INSERT IGNORE 避免主键/唯一键冲突
 INSERT IGNORE INTO production_line (id, line_code, line_name, parent_id, workshop, sort_order) VALUES
@@ -101,7 +120,17 @@ INSERT IGNORE INTO block_line_binding (id, block_id, line_id, bind_type, bind_ti
 (5, 5, 7, 1, '2024-02-01 10:15:00', '王工', '初始分配', 1),
 (6, 6, 10, 1, '2024-03-01 14:00:00', '赵工', '初始分配', 1);
 
-INSERT IGNORE INTO block_transfer (id, transfer_no, block_id, from_line_id, to_line_id, transfer_date, transfer_reason, transfer_operator, receive_operator, remark, print_count) VALUES
-(1, 'TRF-20240601-001', 1, 2, 6, '2024-06-01', '车间产线改造，调整配置', '张工', '刘工', 'A车间升级改造移交', 1),
-(2, 'TRF-20240605-002', 2, 3, 10, '2024-06-05', '临时调配支持C车间', '李工', '陈工', '临时借用', 0),
-(3, 'TRF-20240610-003', 4, 6, 2, '2024-06-10', '改造完成回迁', '刘工', '张工', 'A车间改造完成回迁', 0);
+INSERT IGNORE INTO block_transfer (id, transfer_no, block_id, from_line_id, to_line_id, transfer_date, transfer_reason, transfer_operator, receive_operator, remark, status, handle_note, handle_time, print_count) VALUES
+(1, 'TRF-20240601-001', 1, 2, 6, '2024-06-01', '车间产线改造，调整配置', '张工', '刘工', 'A车间升级改造移交', 'CONFIRMED', '实物核对无误，同意接收', '2024-06-01 15:30:00', 1),
+(2, 'TRF-20240605-002', 2, 3, 10, '2024-06-05', '临时调配支持C车间', '李工', '陈工', '临时借用', 'CONFIRMED', '已接收并安装就位', '2024-06-05 10:20:00', 0),
+(3, 'TRF-20240610-003', 4, 6, 2, '2024-06-10', '改造完成回迁', '刘工', '张工', 'A车间改造完成回迁', 'REJECTED', '挡块厚度规格与01号线当前机型不匹配，暂不接收', '2024-06-10 14:10:00', 0);
+
+-- 历史移交单的流转记录（幂等：按主键 IGNORE）
+INSERT IGNORE INTO transfer_flow_record (id, transfer_id, action, from_status, to_status, operator, note, create_time) VALUES
+(1, 1, 'REGISTER', NULL, 'PENDING', '张工', '移交登记，等待接收方确认', '2024-06-01 09:00:00'),
+(2, 1, 'CONFIRM', 'PENDING', 'CONFIRMED', '刘工', '实物核对无误，同意接收', '2024-06-01 15:30:00'),
+(3, 1, 'PRINT_ORDER', 'CONFIRMED', 'CONFIRMED', '张工', '打印移交单', '2024-06-02 08:30:00'),
+(4, 2, 'REGISTER', NULL, 'PENDING', '李工', '移交登记，等待接收方确认', '2024-06-05 08:50:00'),
+(5, 2, 'CONFIRM', 'PENDING', 'CONFIRMED', '陈工', '已接收并安装就位', '2024-06-05 10:20:00'),
+(6, 3, 'REGISTER', NULL, 'PENDING', '刘工', '移交登记，等待接收方确认', '2024-06-10 11:00:00'),
+(7, 3, 'REJECT', 'PENDING', 'REJECTED', '张工', '挡块厚度规格与01号线当前机型不匹配，暂不接收', '2024-06-10 14:10:00');
