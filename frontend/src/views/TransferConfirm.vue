@@ -105,7 +105,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="等待时长" width="120" align="center">
+        <el-table-column label="等待时长" width="130" align="center">
           <template #default="scope">
             <el-tooltip
               v-if="scope.row.status === 'PENDING'"
@@ -117,9 +117,19 @@
                 {{ scope.row.waitingDuration }}
               </el-tag>
             </el-tooltip>
-            <span v-else class="muted-text">
-              {{ scope.row.status === 'CONFIRMED' ? '已接收' : '已驳回' }}
-            </span>
+            <el-tooltip
+              v-else
+              :content="`办理于 ${formatTime(scope.row.handleTime)}，等待时长已定格`"
+              placement="top"
+            >
+              <el-tag
+                :type="scope.row.status === 'CONFIRMED' ? 'success' : 'info'"
+                effect="plain"
+                size="small"
+              >
+                {{ waitingDurationText(scope.row) }}
+              </el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column prop="createTime" label="登记时间" width="165" />
@@ -275,8 +285,33 @@
           <el-descriptions-item v-if="currentTransfer.handleTime" label="处理时间">
             {{ formatTime(currentTransfer.handleTime) }}
           </el-descriptions-item>
-          <el-descriptions-item v-if="currentTransfer.status === 'PENDING'" label="等待时长">
-            <el-tag type="danger" size="small">{{ currentTransfer.waitingDuration }}</el-tag>
+          <el-descriptions-item label="等待时长">
+            <el-tag
+              :type="currentTransfer.status === 'PENDING' ? 'danger'
+                : currentTransfer.status === 'CONFIRMED' ? 'success' : 'info'"
+              size="small"
+            >
+              {{ waitingDurationText(currentTransfer) }}
+            </el-tag>
+            <span v-if="currentTransfer.status !== 'PENDING'" class="muted-text duration-note">
+              （停在办理时刻{{ formatTime(currentTransfer.handleTime) }}）
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="currentTransfer.status === 'CONFIRMED'" label="回执打印次数">
+            <el-tag :type="(currentTransfer.receiptPrintCount || 0) > 0 ? 'warning' : 'info'" size="small">
+              {{ currentTransfer.receiptPrintCount || 0 }} 次
+            </el-tag>
+            <span v-if="currentTransfer.lastReceiptPrintTime" class="muted-text duration-note">
+              最近 {{ formatTime(currentTransfer.lastReceiptPrintTime) }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="移交单打印次数">
+            <el-tag :type="(currentTransfer.printCount || 0) > 0 ? 'success' : 'info'" size="small">
+              {{ currentTransfer.printCount || 0 }} 次
+            </el-tag>
+            <span v-if="currentTransfer.lastPrintTime" class="muted-text duration-note">
+              最近 {{ formatTime(currentTransfer.lastPrintTime) }}
+            </span>
           </el-descriptions-item>
           <el-descriptions-item v-if="currentTransfer.handleNote" label="处理说明" :span="2">
             {{ currentTransfer.handleNote }}
@@ -359,7 +394,7 @@
       <div class="receipt-area" v-if="currentTransfer">
         <div class="receipt-header">
           <h2>缓冲挡块跨产线移交确认回执</h2>
-          <div class="receipt-no">回执编号：{{ currentTransfer.transferNo }}-R{{ (currentTransfer.receiptPrintCount || 0) + 1 }}</div>
+          <div class="receipt-no">回执编号：{{ currentTransfer.transferNo }}-R{{ receiptOrdinal }}</div>
         </div>
 
         <table class="receipt-table">
@@ -404,7 +439,7 @@
               <td class="label">确认时间</td>
               <td>{{ formatTime(currentTransfer.handleTime) }}</td>
               <td class="label">等待时长</td>
-              <td>{{ waitingText(currentTransfer) }}</td>
+              <td>{{ waitingDurationText(currentTransfer) }}</td>
             </tr>
             <tr>
               <td class="label">移交原因</td>
@@ -443,7 +478,7 @@
           <div class="sign-box"><span>打印日期：</span><span class="sign-line"></span></div>
         </div>
         <div class="receipt-meta">
-          本回执第 {{ (currentTransfer.receiptPrintCount || 0) + 1 }} 次打印 ·
+          本回执第 {{ receiptOrdinal }} 次打印 ·
           打印时间 {{ nowText }}
         </div>
       </div>
@@ -459,7 +494,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import {
@@ -472,6 +507,7 @@ import {
   markReceiptPrinted
 } from '@/api/transfer'
 import { getLeafLines } from '@/api/line'
+import { waitingDurationText } from '@/utils/duration'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -500,6 +536,12 @@ const flowLoading = ref(false)
 const flowRecords = ref([])
 const blockTransfers = ref([])
 const nowText = ref(dayjs().format('YYYY-MM-DD HH:mm:ss'))
+// 本次打开回执弹窗期间是否已打印：打印前预览“第 N 次”，打印后与后端计数保持一致
+const receiptJustPrinted = ref(false)
+const receiptOrdinal = computed(() => {
+  const count = currentTransfer.value?.receiptPrintCount || 0
+  return receiptJustPrinted.value ? count : count + 1
+})
 
 const handleForm = reactive({
   action: 'CONFIRM',
@@ -533,23 +575,6 @@ const flowMeta = (action) => {
 }
 
 const formatTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-')
-
-const waitingText = (row) => {
-  if (row.status === 'PENDING') return row.waitingDuration || '-'
-  if (row.createTime && row.handleTime) {
-    const mins = dayjs(row.handleTime).diff(dayjs(row.createTime), 'minute')
-    if (mins < 60) return `${mins}分钟`
-    const days = Math.floor(mins / 1440)
-    const hours = Math.floor((mins % 1440) / 60)
-    const leftMins = mins % 60
-    let s = ''
-    if (days > 0) s += `${days}天`
-    if (hours > 0) s += `${hours}小时`
-    if (leftMins > 0 || !s) s += `${leftMins}分钟`
-    return s
-  }
-  return '-'
-}
 
 const handleSearch = () => {
   syncDateRange()
@@ -685,6 +710,7 @@ const openDetailDrawer = async (row) => {
 const openReceiptDialog = async (row) => {
   try {
     currentTransfer.value = await getTransferById(row.id)
+    receiptJustPrinted.value = false
     nowText.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
     receiptVisible.value = true
   } catch (e) {
@@ -740,7 +766,7 @@ const doPrintReceipt = async () => {
           <tr><td class="label">原归属产线</td><td>${updated.fromLineName}</td><td class="label">目标产线</td><td>${updated.toLineName}</td></tr>
           <tr><td class="label">移交日期</td><td>${updated.transferDate}</td><td class="label">登记时间</td><td>${formatTime(updated.createTime)}</td></tr>
           <tr><td class="label">移交人</td><td>${updated.transferOperator}</td><td class="label">接收方处理人</td><td>${updated.receiveOperator || '-'}</td></tr>
-          <tr><td class="label">确认时间</td><td>${formatTime(updated.handleTime)}</td><td class="label">等待时长</td><td>${waitingText(updated)}</td></tr>
+          <tr><td class="label">确认时间</td><td>${formatTime(updated.handleTime)}</td><td class="label">等待时长</td><td>${waitingDurationText(updated)}</td></tr>
           <tr><td class="label">移交原因</td><td colspan="3">${updated.transferReason || '-'}</td></tr>
           <tr><td class="label">接收处理说明</td><td colspan="3">${updated.handleNote || '-'}</td></tr>
         </table>

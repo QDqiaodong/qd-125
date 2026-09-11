@@ -288,8 +288,19 @@ public class BlockTransferService {
             transfer.setToLineName(toLine.getLineName());
         }
 
-        if (BlockTransfer.STATUS_PENDING.equals(transfer.getStatus()) && transfer.getCreateTime() != null) {
-            transfer.setWaitingDuration(formatDuration(Duration.between(transfer.getCreateTime(), LocalDateTime.now())));
+        if (transfer.getCreateTime() != null) {
+            if (BlockTransfer.STATUS_PENDING.equals(transfer.getStatus())) {
+                // 待确认单：从登记时刻到当前时刻的实时等待时长
+                transfer.setWaitingDuration(formatDuration(
+                        Duration.between(transfer.getCreateTime(), LocalDateTime.now())));
+            } else {
+                // 已确认/已驳回：等待时长停在办理时刻，不再随当前时间继续增长
+                LocalDateTime endTime = transfer.getHandleTime() != null
+                        ? transfer.getHandleTime()
+                        : transfer.getUpdateTime();
+                transfer.setWaitingDuration(formatDuration(
+                        Duration.between(transfer.getCreateTime(), endTime)));
+            }
         }
 
         CalibrationStatusVO calibrationStatus = calibrationService.statusOf(transfer.getBlockId());
