@@ -3,6 +3,7 @@ package com.bufferblock.service;
 import com.bufferblock.dto.TransferCreateDTO;
 import com.bufferblock.dto.TransferHandleDTO;
 import com.bufferblock.dto.TransferQueryDTO;
+import com.bufferblock.dto.CalibrationStatusVO;
 import com.bufferblock.entity.BlockTransfer;
 import com.bufferblock.entity.BufferBlock;
 import com.bufferblock.entity.ProductionLine;
@@ -28,17 +29,20 @@ public class BlockTransferService {
     private final BufferBlockService bufferBlockService;
     private final ProductionLineService productionLineService;
     private final TransferNumberService transferNumberService;
+    private final CalibrationService calibrationService;
 
     public BlockTransferService(BlockTransferRepository blockTransferRepository,
                                 TransferFlowRecordRepository transferFlowRecordRepository,
                                 BufferBlockService bufferBlockService,
                                 ProductionLineService productionLineService,
-                                TransferNumberService transferNumberService) {
+                                TransferNumberService transferNumberService,
+                                CalibrationService calibrationService) {
         this.blockTransferRepository = blockTransferRepository;
         this.transferFlowRecordRepository = transferFlowRecordRepository;
         this.bufferBlockService = bufferBlockService;
         this.productionLineService = productionLineService;
         this.transferNumberService = transferNumberService;
+        this.calibrationService = calibrationService;
     }
 
     public Page<BlockTransfer> queryTransfers(TransferQueryDTO query) {
@@ -85,6 +89,9 @@ public class BlockTransferService {
         if (currentBinding == null || !currentBinding.getLineId().equals(dto.getFromLineId())) {
             throw new RuntimeException("挡块当前不在指定的移出产线");
         }
+
+        // 挂起待修或校准逾期的挡块不得办理移交（不登记、不改绑定），返回明确的逾期/挂起说明
+        calibrationService.assertTransferable(dto.getBlockId());
 
         List<BlockTransfer> pendingTransfers =
                 blockTransferRepository.findByBlockIdAndStatusOrderByCreateTimeDesc(
@@ -141,6 +148,9 @@ public class BlockTransferService {
     @Transactional
     public BlockTransfer confirmTransfer(Long id, TransferHandleDTO dto) {
         BlockTransfer transfer = getPendingTransfer(id);
+
+        // 确认即变更绑定的最后关口：登记后校准逾期或挂起的，同样阻断，绑定保持不变
+        calibrationService.assertTransferable(transfer.getBlockId());
 
         String operator = resolveReceiveOperator(transfer, dto);
         transfer.setStatus(BlockTransfer.STATUS_CONFIRMED);
@@ -280,6 +290,15 @@ public class BlockTransferService {
 
         if (BlockTransfer.STATUS_PENDING.equals(transfer.getStatus()) && transfer.getCreateTime() != null) {
             transfer.setWaitingDuration(formatDuration(Duration.between(transfer.getCreateTime(), LocalDateTime.now())));
+        }
+
+        CalibrationStatusVO calibrationStatus = calibrationService.statusOf(transfer.getBlockId());
+        if (calibrationStatus != null) {
+            transfer.setCalibrationStatus(calibrationStatus.getStatus());
+            transfer.setOverdueDays(calibrationStatus.getOverdueDays());
+            if (calibrationStatus.getNextDueDate() != null) {
+                transfer.setNextDueDate(calibrationStatus.getNextDueDate().toString());
+            }
         }
     }
 

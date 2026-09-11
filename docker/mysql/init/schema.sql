@@ -28,10 +28,15 @@ CREATE TABLE IF NOT EXISTS buffer_block (
     thickness DECIMAL(10,2) NOT NULL COMMENT '厚度规格(mm)',
     image_url VARCHAR(500) DEFAULT NULL COMMENT '实物图片URL',
     spec_template VARCHAR(50) DEFAULT NULL COMMENT '规格模板标识',
+    calibration_cycle_months INT DEFAULT 12 COMMENT '校准周期(月)',
+    service_status VARCHAR(20) DEFAULT 'IN_SERVICE' COMMENT '在用状态: IN_SERVICE-在用, SUSPENDED-挂起待修',
+    suspend_reason VARCHAR(500) DEFAULT NULL COMMENT '挂起原因',
+    suspend_time DATETIME DEFAULT NULL COMMENT '挂起时间',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_block_code (block_code),
-    INDEX idx_spec_template (spec_template)
+    INDEX idx_spec_template (spec_template),
+    INDEX idx_service_status (service_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='缓冲挡块基础档案';
 
 CREATE TABLE IF NOT EXISTS block_line_binding (

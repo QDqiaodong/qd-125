@@ -97,6 +97,15 @@ public class BlockTransfer {
     @Transient
     private String waitingDuration;
 
+    @Transient
+    private String calibrationStatus;
+
+    @Transient
+    private String nextDueDate;
+
+    @Transient
+    private Integer overdueDays;
+
     public BlockTransfer() {
     }
 
@@ -177,4 +186,13 @@ public class BlockTransfer {
 
     public String getWaitingDuration() { return waitingDuration; }
     public void setWaitingDuration(String waitingDuration) { this.waitingDuration = waitingDuration; }
+
+    public String getCalibrationStatus() { return calibrationStatus; }
+    public void setCalibrationStatus(String calibrationStatus) { this.calibrationStatus = calibrationStatus; }
+
+    public String getNextDueDate() { return nextDueDate; }
+    public void setNextDueDate(String nextDueDate) { this.nextDueDate = nextDueDate; }
+
+    public Integer getOverdueDays() { return overdueDays; }
+    public void setOverdueDays(Integer overdueDays) { this.overdueDays = overdueDays; }
 }
