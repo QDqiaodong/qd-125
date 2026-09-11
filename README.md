@@ -13,12 +13,12 @@
 3. **筛选与跟踪**：支持按状态、相关产线（移出/移入）、日期区间、挡块编号筛选；待确认单据实时展示等待时长，详情抽屉展示完整流转记录（登记 → 确认/驳回 → 打印）。
 4. **回执打印**：已确认单据可打印《缓冲挡块跨产线移交确认回执》，回执含确认时间、等待时长、处理说明和流转节点，并记录回执打印次数。
 
-> 存量数据库升级：新版后端启动时会在 Web 服务接受请求前自动执行一次幂等迁移
-> （`com.bufferblock.migration.TransferConfirmSchemaMigration`，基于 information_schema 守卫）：
-> 补齐 `block_transfer` 的确认字段与状态索引、创建 `transfer_flow_record` 表、
-> 将升级前按旧流程登记（无流转记录）的历史单据回填为“已确认”并补登流转记录，
-> 不改动任何 `block_line_binding` 产线绑定；重复启动安全。
-> 也可手动执行 `docker/mysql/init/z_V2_transfer_confirm.sql`（幂等，效果相同）。
+> 存量数据库升级：新版后端启动时会在 Web 服务接受请求前自动执行幂等迁移：
+> `TransferConfirmSchemaMigration` 补齐 `block_transfer` 的确认字段与状态索引、创建 `transfer_flow_record` 表、
+> 将升级前按旧流程登记（无流转记录）的历史单据回填为“已确认”并补登流转记录；
+> `TransferSequenceSchemaMigration` 创建 `block_transfer_sequence` 按日期持久化发号器。
+> 迁移不改动任何 `block_line_binding` 产线绑定，重复启动安全。
+> 也可手动执行 `docker/mysql/init/z_V2_transfer_confirm.sql` 和 `docker/mysql/init/zz_V3_transfer_sequence.sql`（均幂等）。
 > 注意：`/docker-entrypoint-initdb.d` 下脚本只在 MySQL 数据目录为空时执行，存量数据卷必须依赖上述启动迁移。
 
 ## 技术栈

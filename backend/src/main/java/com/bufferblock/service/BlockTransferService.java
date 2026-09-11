@@ -18,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Service
@@ -28,26 +27,18 @@ public class BlockTransferService {
     private final TransferFlowRecordRepository transferFlowRecordRepository;
     private final BufferBlockService bufferBlockService;
     private final ProductionLineService productionLineService;
-
-    private static final DateTimeFormatter TRANSFER_NO_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-
-    /**
-     * 当日序号内存缓存（与库内当日最大序号对齐）。
-     * 重启后首次发号会重新读取数据库，避免旧实现重启归零撞 transfer_no 唯一键。
-     * key=yyyyMMdd，value=已分配的最大序号。
-     */
-    private volatile String dailyCounterDate = "";
-    private int dailyCounter = 0;
-    private final Object dailyCounterLock = new Object();
+    private final TransferNumberService transferNumberService;
 
     public BlockTransferService(BlockTransferRepository blockTransferRepository,
                                 TransferFlowRecordRepository transferFlowRecordRepository,
                                 BufferBlockService bufferBlockService,
-                                ProductionLineService productionLineService) {
+                                ProductionLineService productionLineService,
+                                TransferNumberService transferNumberService) {
         this.blockTransferRepository = blockTransferRepository;
         this.transferFlowRecordRepository = transferFlowRecordRepository;
         this.bufferBlockService = bufferBlockService;
         this.productionLineService = productionLineService;
+        this.transferNumberService = transferNumberService;
     }
 
     public Page<BlockTransfer> queryTransfers(TransferQueryDTO query) {
@@ -82,11 +73,10 @@ public class BlockTransferService {
 
     @Transactional
     public BlockTransfer createTransfer(TransferCreateDTO dto) {
-        if (dto.getFromLineId().equals(dto.getToLineId())) {
-            throw new RuntimeException("移出产线和移入产线不能相同");
-        }
+        validateCreateRequest(dto);
+        LocalDate transferDate = dto.getTransferDate() != null ? dto.getTransferDate() : LocalDate.now();
 
-        BufferBlock block = bufferBlockService.getEntityById(dto.getBlockId());
+        BufferBlock block = bufferBlockService.lockEntityById(dto.getBlockId());
         if (block == null) {
             throw new RuntimeException("挡块不存在");
         }
@@ -104,27 +94,45 @@ public class BlockTransferService {
         }
 
         BlockTransfer transfer = new BlockTransfer();
-        transfer.setTransferNo(generateTransferNo());
+        transfer.setTransferNo(transferNumberService.nextTransferNo(transferDate));
         transfer.setBlockId(dto.getBlockId());
         transfer.setFromLineId(dto.getFromLineId());
         transfer.setToLineId(dto.getToLineId());
-        transfer.setTransferDate(dto.getTransferDate() != null ? dto.getTransferDate() : LocalDate.now());
+        transfer.setTransferDate(transferDate);
         transfer.setTransferReason(dto.getTransferReason());
-        transfer.setTransferOperator(dto.getTransferOperator());
+        transfer.setTransferOperator(dto.getTransferOperator().trim());
         transfer.setReceiveOperator(dto.getReceiveOperator());
         transfer.setRemark(dto.getRemark());
         transfer.setStatus(BlockTransfer.STATUS_PENDING);
         transfer.setPrintCount(0);
         transfer.setReceiptPrintCount(0);
-        transfer = blockTransferRepository.save(transfer);
+        transfer = blockTransferRepository.saveAndFlush(transfer);
 
         // 登记后进入待确认状态，不立即变更产线绑定
         recordFlow(transfer.getId(), TransferFlowRecord.ACTION_REGISTER, null,
-                BlockTransfer.STATUS_PENDING, dto.getTransferOperator(),
+                BlockTransfer.STATUS_PENDING, transfer.getTransferOperator(),
                 "移交登记，等待接收方确认");
 
         enrichTransfer(transfer);
         return transfer;
+    }
+
+    private void validateCreateRequest(TransferCreateDTO dto) {
+        if (dto == null) {
+            throw new RuntimeException("移交登记参数不能为空");
+        }
+        if (dto.getBlockId() == null) {
+            throw new RuntimeException("请选择挡块");
+        }
+        if (dto.getFromLineId() == null || dto.getToLineId() == null) {
+            throw new RuntimeException("请选择移出产线和移入产线");
+        }
+        if (dto.getFromLineId().equals(dto.getToLineId())) {
+            throw new RuntimeException("移出产线和移入产线不能相同");
+        }
+        if (dto.getTransferOperator() == null || dto.getTransferOperator().isBlank()) {
+            throw new RuntimeException("请输入移交人");
+        }
     }
 
     /**
@@ -247,23 +255,8 @@ public class BlockTransferService {
 
     private void recordFlow(Long transferId, String action, String fromStatus, String toStatus,
                             String operator, String note) {
-        transferFlowRecordRepository.save(
+        transferFlowRecordRepository.saveAndFlush(
                 new TransferFlowRecord(transferId, action, fromStatus, toStatus, operator, note));
-    }
-
-    private String generateTransferNo() {
-        String dateStr = LocalDate.now().format(TRANSFER_NO_DATE);
-        String prefix = String.format("TRF-%s-", dateStr);
-        int seq;
-        synchronized (dailyCounterLock) {
-            if (!dateStr.equals(dailyCounterDate)) {
-                Integer maxSeq = blockTransferRepository.findMaxDailySequence(prefix);
-                dailyCounter = maxSeq != null ? maxSeq : 0;
-                dailyCounterDate = dateStr;
-            }
-            seq = ++dailyCounter;
-        }
-        return String.format("TRF-%s-%03d", dateStr, seq);
     }
 
     private void enrichTransfer(BlockTransfer transfer) {

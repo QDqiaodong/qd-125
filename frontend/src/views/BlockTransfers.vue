@@ -208,8 +208,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitCreateForm">确定登记</el-button>
+        <el-button @click="createVisible = false" :disabled="submitting">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitCreateForm">确定登记</el-button>
       </template>
     </el-dialog>
 
@@ -337,6 +337,7 @@ const query = reactive({
 })
 
 const createVisible = ref(false)
+const submitting = ref(false)
 const createFormRef = ref(null)
 const createForm = reactive({
   blockId: null,
@@ -425,18 +426,22 @@ const resetCreateForm = () => {
 }
 
 const submitCreateForm = async () => {
+  if (submitting.value) return
   if (!createFormRef.value) return
-  await createFormRef.value.validate(async (valid) => {
-    if (!valid) return
-    try {
-      await createTransfer(createForm)
-      ElMessage.success('移交登记成功，等待接收方确认')
-      createVisible.value = false
-      await loadData()
-    } catch (e) {
-      // error handled
-    }
-  })
+  const valid = await createFormRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  submitting.value = true
+  try {
+    await createTransfer(createForm)
+    ElMessage.success('移交登记成功，等待接收方确认')
+    createVisible.value = false
+    await loadData()
+  } catch (e) {
+    // 统一请求拦截器已展示后端明确错误；不提示成功，也不关闭登记窗口
+  } finally {
+    submitting.value = false
+  }
 }
 
 const openPrintDialog = async (row) => {

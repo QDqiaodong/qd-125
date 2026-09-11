@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS block_transfer (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='挡块跨产线移交记录';
 
+CREATE TABLE IF NOT EXISTS block_transfer_sequence (
+    sequence_date VARCHAR(8) NOT NULL PRIMARY KEY COMMENT '发号业务日期 yyyyMMdd',
+    current_value INT NOT NULL COMMENT '已分配的最大流水号'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='移交单号按日期发号器';
+
+INSERT IGNORE INTO block_transfer_sequence (sequence_date, current_value) VALUES ('LOCK', 0);
+
 CREATE TABLE IF NOT EXISTS transfer_flow_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     transfer_id BIGINT NOT NULL COMMENT '移交单ID',

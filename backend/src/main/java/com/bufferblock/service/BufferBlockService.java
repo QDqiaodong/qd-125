@@ -45,6 +45,14 @@ public class BufferBlockService {
         return bufferBlockRepository.findById(id).orElse(null);
     }
 
+    /**
+     * 锁定挡块主数据，串行化同一挡块的并发登记，避免重复生成待确认移交单。
+     */
+    @Transactional(readOnly = true)
+    public BufferBlock lockEntityById(Long id) {
+        return bufferBlockRepository.findByIdForUpdate(id).orElse(null);
+    }
+
     @Cacheable(value = "specTemplates", key = "'all'")
     public List<String> getAllSpecTemplates() {
         return bufferBlockRepository.findAllSpecTemplates();
@@ -124,6 +132,7 @@ public class BufferBlockService {
         return result;
     }
 
+    @Transactional(readOnly = true)
     public BlockLineBinding getCurrentBinding(Long blockId) {
         return blockLineBindingRepository.findByBlockIdAndIsCurrent(blockId, 1).orElse(null);
     }
