@@ -59,6 +59,27 @@
     </el-row>
 
     <el-row :gutter="20" style="margin-top: 20px;">
+      <el-col :span="24">
+        <div class="page-card stocktake-banner" @click="goStocktake">
+          <div class="pending-left">
+            <el-icon :size="26" color="#409eff"><DocumentChecked /></el-icon>
+            <div>
+              <div class="pending-title">盘点差异闭环</div>
+              <div class="pending-desc">按产线创建盘点批次，逐项录入实物并闭环缺失、错线、重复盘点等差异</div>
+            </div>
+          </div>
+          <div class="pending-right">
+            <span class="stocktake-count">{{ stocktake.countingBatches }}</span>
+            <span class="pending-unit">个批次盘点中 ·</span>
+            <span class="stocktake-pending">{{ stocktake.pendingDiscrepancies }}</span>
+            <span class="pending-unit">条差异待处理</span>
+            <el-button type="primary" plain size="small">前往盘点</el-button>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="12">
         <div class="page-card">
           <div class="page-header">
@@ -122,6 +143,7 @@
                 <li>跨产线移交登记（待确认）</li>
                 <li>接收方确认/驳回，确认后更新产线绑定</li>
                 <li>等待时长、流转记录与确认回执打印</li>
+                <li>挡块盘点差异闭环：缺失/错线/重复/盘盈自动标记与处理追溯</li>
               </ul>
             </el-descriptions-item>
             <el-descriptions-item label="使用说明">
@@ -130,6 +152,7 @@
                 <li>产线视图以树形结构展示车间与产线</li>
                 <li>移交台账支持登记、日期筛选与移交单打印</li>
                 <li>“移交确认”支持按状态、产线、日期筛选并打印确认回执</li>
+                <li>“挡块盘点差异”按产线创建批次、逐项录入、闭环处理并导出结果</li>
               </ul>
             </el-descriptions-item>
           </el-descriptions>
@@ -146,6 +169,7 @@ import { getAllBlocks } from '@/api/block'
 import { getLeafLines } from '@/api/line'
 import { getTransfersByDateRange, getTransfersByBlockId } from '@/api/transfer'
 import { getSpecTemplates } from '@/api/block'
+import { getStocktakeOverview } from '@/api/stocktake'
 import dayjs from 'dayjs'
 
 const router = useRouter()
@@ -156,6 +180,11 @@ const stats = ref({
   monthTransfers: 0,
   specTemplates: 0,
   pendingTransfers: 0
+})
+
+const stocktake = ref({
+  countingBatches: 0,
+  pendingDiscrepancies: 0
 })
 
 const recentTransfers = ref([])
@@ -174,15 +203,22 @@ const goConfirm = () => {
   router.push('/transfer-confirm')
 }
 
+const goStocktake = () => {
+  router.push('/stocktakes')
+}
+
 onMounted(async () => {
   try {
-    const [blocks, lines, templates, transfers] = await Promise.all([
+    const [blocks, lines, templates, transfers, overview] = await Promise.all([
       getAllBlocks(),
       getLeafLines(),
       getSpecTemplates(),
-      getTransfersByDateRange()
+      getTransfersByDateRange(),
+      getStocktakeOverview()
     ])
 
+    stocktake.value.countingBatches = overview.countingBatches
+    stocktake.value.pendingDiscrepancies = overview.pendingDiscrepancies
     stats.value.totalLines = lines.length
     stats.value.totalBlocks = blocks.length
     stats.value.specTemplates = templates.length
@@ -260,5 +296,26 @@ onMounted(async () => {
   color: #909399;
   font-size: 13px;
   margin-right: 12px;
+}
+.stocktake-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-left: 4px solid #409eff;
+  transition: box-shadow 0.2s;
+}
+.stocktake-banner:hover {
+  box-shadow: 0 4px 14px rgba(64, 158, 255, 0.25);
+}
+.stocktake-count {
+  font-size: 26px;
+  font-weight: 700;
+  color: #409eff;
+}
+.stocktake-pending {
+  font-size: 26px;
+  font-weight: 700;
+  color: #f56c6c;
 }
 </style>

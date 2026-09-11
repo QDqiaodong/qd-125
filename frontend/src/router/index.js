@@ -25,6 +25,11 @@ const routes = [
     path: '/transfer-confirm',
     name: 'TransferConfirm',
     component: () => import('@/views/TransferConfirm.vue')
+  },
+  {
+    path: '/stocktakes',
+    name: 'Stocktakes',
+    component: () => import('@/views/Stocktakes.vue')
   }
 ]
 
