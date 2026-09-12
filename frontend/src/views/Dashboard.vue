@@ -105,6 +105,32 @@
     </el-row>
 
     <el-row :gutter="20" style="margin-top: 20px;">
+      <el-col :span="24">
+        <div class="page-card handover-banner" :class="{ 'handover-active': handover.inProgress }" @click="goHandover">
+          <div class="pending-left">
+            <el-icon :size="26" :color="handover.inProgress ? '#e6a23c' : '#67c23a'"><SwitchButton /></el-icon>
+            <div>
+              <div class="pending-title">班组交班</div>
+              <div class="pending-desc">交班一次性登记未还预约、待确认移交与待处理盘点差异，接班人逐条确认后完成；交班未完成时禁止新开借用预约</div>
+            </div>
+          </div>
+          <div class="pending-right">
+            <template v-if="handover.inProgress">
+              <span class="handover-count">{{ handover.unconfirmedCount }}</span>
+              <span class="pending-unit">项待接班确认 ·</span>
+              <span class="pending-unit">{{ handover.handoverNo }}</span>
+              <el-button type="warning" plain size="small">前往确认</el-button>
+            </template>
+            <template v-else>
+              <span class="handover-done">无进行中的交班</span>
+              <el-button type="success" plain size="small">查看交班</el-button>
+            </template>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="12">
         <div class="page-card">
           <div class="page-header">
@@ -170,6 +196,7 @@
                 <li>等待时长、流转记录与确认回执打印</li>
                 <li>挡块盘点差异闭环：缺失/错线/重复/盘盈自动标记与处理追溯</li>
                 <li>挡块借用预约：空闲挡块预约取用/归还点，占用档案标记“已约出”，取消必写原因，到点未取自动提醒</li>
+                <li>班组交班：一次性登记未还预约/待确认移交/待处理盘点差异，接班人逐条确认，交班未完成禁止新开预约</li>
               </ul>
             </el-descriptions-item>
             <el-descriptions-item label="使用说明">
@@ -197,6 +224,7 @@ import { getTransfersByDateRange, getTransfersByBlockId } from '@/api/transfer'
 import { getSpecTemplates } from '@/api/block'
 import { getStocktakeOverview } from '@/api/stocktake'
 import { getBorrowOverview } from '@/api/borrow'
+import { getHandoverOverview } from '@/api/handover'
 import dayjs from 'dayjs'
 
 const router = useRouter()
@@ -220,6 +248,12 @@ const borrow = ref({
   overdueCount: 0,
   overdueReturnCount: 0,
   activeCount: 0
+})
+
+const handover = ref({
+  inProgress: false,
+  handoverNo: '',
+  unconfirmedCount: 0
 })
 
 const recentTransfers = ref([])
@@ -246,15 +280,20 @@ const goBorrow = () => {
   router.push('/borrow')
 }
 
+const goHandover = () => {
+  router.push('/handovers')
+}
+
 onMounted(async () => {
   try {
-    const [blocks, lines, templates, transfers, overview, borrowOverview] = await Promise.all([
+    const [blocks, lines, templates, transfers, overview, borrowOverview, handoverOverview] = await Promise.all([
       getAllBlocks(),
       getLeafLines(),
       getSpecTemplates(),
       getTransfersByDateRange(),
       getStocktakeOverview(),
-      getBorrowOverview()
+      getBorrowOverview(),
+      getHandoverOverview()
     ])
 
     stocktake.value.countingBatches = overview.countingBatches
@@ -264,6 +303,7 @@ onMounted(async () => {
     borrow.value.overdueCount = borrowOverview.overdueCount
     borrow.value.overdueReturnCount = borrowOverview.overdueReturnCount || 0
     borrow.value.activeCount = borrowOverview.activeCount
+    handover.value = handoverOverview
     stats.value.totalLines = lines.length
     stats.value.totalBlocks = blocks.length
     stats.value.specTemplates = templates.length
@@ -386,5 +426,30 @@ onMounted(async () => {
   font-size: 26px;
   font-weight: 700;
   color: #e6a23c;
+}
+.handover-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-left: 4px solid #67c23a;
+  transition: box-shadow 0.2s;
+}
+.handover-banner.handover-active {
+  border-left-color: #e6a23c;
+}
+.handover-banner:hover {
+  box-shadow: 0 4px 14px rgba(230, 162, 60, 0.25);
+}
+.handover-count {
+  font-size: 26px;
+  font-weight: 700;
+  color: #e6a23c;
+}
+.handover-done {
+  font-size: 15px;
+  font-weight: 600;
+  color: #67c23a;
+  margin-right: 12px;
 }
 </style>

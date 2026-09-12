@@ -43,6 +43,10 @@
             <el-icon><Calendar /></el-icon>
             <span>挡块借用预约</span>
           </el-menu-item>
+          <el-menu-item index="/handovers">
+            <el-icon><SwitchButton /></el-icon>
+            <span>班组交班</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main class="app-main">

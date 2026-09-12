@@ -35,6 +35,11 @@ const routes = [
     path: '/borrow',
     name: 'BorrowReservations',
     component: () => import('@/views/BorrowReservations.vue')
+  },
+  {
+    path: '/handovers',
+    name: 'ShiftHandovers',
+    component: () => import('@/views/ShiftHandovers.vue')
   }
 ]
 

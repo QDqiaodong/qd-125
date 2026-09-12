@@ -46,4 +46,13 @@ public interface StocktakeItemRepository extends JpaRepository<StocktakeItem, Lo
     @Query("UPDATE StocktakeItem i SET i.discrepancyType = 'MISSING', i.discrepancyStatus = 'PENDING' " +
            "WHERE i.batchId = :batchId AND i.isCounted = 0 AND i.isExtra = 0 AND i.discrepancyType = 'NONE'")
     int markWaitingAsMissing(@Param("batchId") Long batchId);
+
+    /**
+     * 盘点中批次的全部待处理差异（与 StocktakeService 概览“待处理差异数”同一口径），
+     * 供班组交班一次性登记快照。
+     */
+    @Query("SELECT i FROM StocktakeItem i, StocktakeBatch b WHERE i.batchId = b.id " +
+           "AND b.status = 'COUNTING' AND i.discrepancyType <> 'NONE' AND i.discrepancyStatus = 'PENDING' " +
+           "ORDER BY i.id ASC")
+    List<StocktakeItem> findPendingDiscrepanciesInCountingBatches();
 }

@@ -35,6 +35,7 @@ import java.util.Set;
  *     <li>已取走但超过计划还期仍未归还的，列表实时派生“超期未还”标记与超期时长，整行标红；</li>
  *     <li>取消必须填写原因，原因随状态一并落库；</li>
  *     <li>到约定取用时间未取走（含宽限期）由定时任务置为“逾时未取”并提醒，提醒落库；</li>
+ *     <li>班组交班未完成（接班人未逐条确认完）期间禁止新开预约；</li>
  *     <li>全部状态均落库持久化，刷新/重开页面后档案标记与预约状态保持一致。</li>
  * </ul>
  */
@@ -63,19 +64,22 @@ public class BorrowReservationService {
     private final ProductionLineService productionLineService;
     private final CalibrationService calibrationService;
     private final BorrowNumberService borrowNumberService;
+    private final ShiftHandoverService shiftHandoverService;
 
     public BorrowReservationService(BlockBorrowReservationRepository reservationRepository,
                                     BlockBorrowFlowRecordRepository flowRecordRepository,
                                     BufferBlockService bufferBlockService,
                                     ProductionLineService productionLineService,
                                     CalibrationService calibrationService,
-                                    BorrowNumberService borrowNumberService) {
+                                    BorrowNumberService borrowNumberService,
+                                    ShiftHandoverService shiftHandoverService) {
         this.reservationRepository = reservationRepository;
         this.flowRecordRepository = flowRecordRepository;
         this.bufferBlockService = bufferBlockService;
         this.productionLineService = productionLineService;
         this.calibrationService = calibrationService;
         this.borrowNumberService = borrowNumberService;
+        this.shiftHandoverService = shiftHandoverService;
     }
 
     // ---------------------------------------------------------------- 查询
@@ -147,6 +151,9 @@ public class BorrowReservationService {
     @Transactional
     public BlockBorrowReservation create(BorrowReservationCreateDTO dto) {
         validateCreate(dto);
+
+        // 交班未完成（接班人未逐条确认完）时禁止新开预约，交班完成后自动恢复
+        shiftHandoverService.assertNoInProgressHandover();
 
         // 锁定挡块主数据，串行化同一挡块的并发预约，避免重复占用
         BufferBlock block = bufferBlockService.lockEntityById(dto.getBlockId());

@@ -32,6 +32,22 @@
       </template>
     </el-alert>
 
+    <!-- 班组交班未完成横幅：交班未完成期间禁止新开预约 -->
+    <el-alert
+      v-if="handover.inProgress"
+      class="overdue-banner"
+      type="warning"
+      show-icon
+      :closable="false"
+    >
+      <template #title>
+        <div class="overdue-title">
+          <el-icon><SwitchButton /></el-icon>
+          班组交班未完成（{{ handover.handoverNo }}，还剩 {{ handover.unconfirmedCount }} 项待接班人确认），完成前禁止新开借用预约
+        </div>
+      </template>
+    </el-alert>
+
     <div class="page-card">
       <div class="page-header">
         <div class="page-title">
@@ -43,10 +59,18 @@
             <el-icon><Refresh /></el-icon>
             刷新
           </el-button>
-          <el-button type="primary" @click="openCreateDialog">
-            <el-icon><Plus /></el-icon>
-            新开借用预约
-          </el-button>
+          <el-tooltip
+            :disabled="!handover.inProgress"
+            :content="`班组交班未完成（${handover.handoverNo}），接班人确认完成前禁止新开预约`"
+            placement="top"
+          >
+            <span>
+              <el-button type="primary" :disabled="handover.inProgress" @click="openCreateDialog">
+                <el-icon><Plus /></el-icon>
+                新开借用预约
+              </el-button>
+            </span>
+          </el-tooltip>
         </div>
       </div>
 
@@ -549,6 +573,7 @@ import {
   cancelBorrowReservation,
   getBorrowFlowRecords
 } from '@/api/borrow'
+import { getHandoverOverview } from '@/api/handover'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -558,6 +583,8 @@ const allBlocks = ref([])
 const leafLines = ref([])
 
 const overview = ref({ reservedCount: 0, pickedUpCount: 0, overdueCount: 0, overdueReturnCount: 0, activeCount: 0 })
+// 班组交班状态：交班未完成时禁止新开预约（后端同样拦截，前后端口径一致）
+const handover = ref({ inProgress: false, handoverNo: '', unconfirmedCount: 0 })
 
 const query = reactive({ status: '', teamName: '', blockCode: '', page: 1, size: 10 })
 
@@ -624,8 +651,16 @@ const loadOverview = async () => {
   }
 }
 
+const loadHandover = async () => {
+  try {
+    handover.value = await getHandoverOverview()
+  } catch (e) {
+    // ignore
+  }
+}
+
 const loadData = async () => {
-  await Promise.all([loadList(), loadOverview()])
+  await Promise.all([loadList(), loadOverview(), loadHandover()])
 }
 
 const handleSearch = () => {
@@ -854,6 +889,7 @@ onMounted(async () => {
   await loadData()
   pollTimer = setInterval(() => {
     loadOverview()
+    loadHandover()
     // 已取走列表也要周期刷新，以便超期未还标记随计划还期到期自动出现
     if (!query.status || query.status === 'RESERVED' || query.status === 'OVERDUE'
         || query.status === 'PICKED_UP') {
