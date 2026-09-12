@@ -3,9 +3,11 @@ package com.bufferblock.service;
 import com.bufferblock.dto.BufferBlockDTO;
 import com.bufferblock.dto.CalibrationStatusVO;
 import com.bufferblock.entity.BlockLineBinding;
+import com.bufferblock.entity.BlockTransfer;
 import com.bufferblock.entity.BufferBlock;
 import com.bufferblock.entity.ProductionLine;
 import com.bufferblock.repository.BlockLineBindingRepository;
+import com.bufferblock.repository.BlockTransferRepository;
 import com.bufferblock.repository.BufferBlockRepository;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -14,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -23,15 +26,18 @@ public class BufferBlockService {
 
     private final BufferBlockRepository bufferBlockRepository;
     private final BlockLineBindingRepository blockLineBindingRepository;
+    private final BlockTransferRepository blockTransferRepository;
     private final ProductionLineService productionLineService;
     private final CalibrationService calibrationService;
 
     public BufferBlockService(BufferBlockRepository bufferBlockRepository,
                               BlockLineBindingRepository blockLineBindingRepository,
+                              BlockTransferRepository blockTransferRepository,
                               ProductionLineService productionLineService,
                               CalibrationService calibrationService) {
         this.bufferBlockRepository = bufferBlockRepository;
         this.blockLineBindingRepository = blockLineBindingRepository;
+        this.blockTransferRepository = blockTransferRepository;
         this.productionLineService = productionLineService;
         this.calibrationService = calibrationService;
     }
@@ -39,8 +45,9 @@ public class BufferBlockService {
     public List<BufferBlockDTO> getAllBlocks() {
         List<BufferBlock> blocks = bufferBlockRepository.findAll();
         Map<Long, CalibrationStatusVO> statusMap = calibrationService.statusMapOfBlocks(blocks);
+        Map<Long, String> pendingMap = pendingTransferNoMap();
         return blocks.stream()
-                .map(block -> convertToDTO(block, statusMap.get(block.getId())))
+                .map(block -> withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap))
                 .collect(Collectors.toList());
     }
 
@@ -144,11 +151,30 @@ public class BufferBlockService {
             bufferBlockRepository.findById(binding.getBlockId()).ifPresent(blocks::add);
         }
         Map<Long, CalibrationStatusVO> statusMap = calibrationService.statusMapOfBlocks(blocks);
+        Map<Long, String> pendingMap = pendingTransferNoMap();
         List<BufferBlockDTO> result = new ArrayList<>();
         for (BufferBlock block : blocks) {
-            result.add(convertToDTO(block, statusMap.get(block.getId())));
+            result.add(withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap));
         }
         return result;
+    }
+
+    /**
+     * 待确认移交单按挡块归集（同一挡块同时只允许一张待确认单），供列表/角标统一标记。
+     */
+    private Map<Long, String> pendingTransferNoMap() {
+        Map<Long, String> map = new HashMap<>();
+        for (BlockTransfer transfer : blockTransferRepository.findByStatus(BlockTransfer.STATUS_PENDING)) {
+            map.putIfAbsent(transfer.getBlockId(), transfer.getTransferNo());
+        }
+        return map;
+    }
+
+    private BufferBlockDTO withPendingTransfer(BufferBlockDTO dto, Map<Long, String> pendingMap) {
+        String transferNo = pendingMap.get(dto.getId());
+        dto.setPendingTransfer(transferNo != null);
+        dto.setPendingTransferNo(transferNo);
+        return dto;
     }
 
     @Transactional(readOnly = true)

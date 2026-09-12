@@ -33,6 +33,11 @@ public class BufferBlockDTO {
     /** 逾期天数（未逾期为 null） */
     private Integer overdueDays;
 
+    /** 是否存在待确认移交单 */
+    private Boolean pendingTransfer;
+    /** 待确认移交单号 */
+    private String pendingTransferNo;
+
     public BufferBlockDTO() {
     }
 
@@ -92,4 +97,10 @@ public class BufferBlockDTO {
 
     public Integer getOverdueDays() { return overdueDays; }
     public void setOverdueDays(Integer overdueDays) { this.overdueDays = overdueDays; }
+
+    public Boolean getPendingTransfer() { return pendingTransfer; }
+    public void setPendingTransfer(Boolean pendingTransfer) { this.pendingTransfer = pendingTransfer; }
+
+    public String getPendingTransferNo() { return pendingTransferNo; }
+    public void setPendingTransferNo(String pendingTransferNo) { this.pendingTransferNo = pendingTransferNo; }
 }

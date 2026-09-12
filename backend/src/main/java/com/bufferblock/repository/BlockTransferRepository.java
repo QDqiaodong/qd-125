@@ -37,6 +37,8 @@ public interface BlockTransferRepository extends JpaRepository<BlockTransfer, Lo
 
     List<BlockTransfer> findByBlockIdOrderByTransferDateDesc(Long blockId);
 
+    List<BlockTransfer> findByStatus(String status);
+
     List<BlockTransfer> findByBlockIdAndStatusOrderByCreateTimeDesc(Long blockId, String status);
 
     @Query("SELECT t FROM BlockTransfer t WHERE t.transferNo LIKE CONCAT(:prefix, '%') " +
