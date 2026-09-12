@@ -4,11 +4,13 @@ import java.time.LocalDate;
 
 /**
  * 挡块校准状态视图（派生，不入库）：
- * NORMAL-正常 / OVERDUE-校准逾期 / SUSPENDED-挂起待修 / UNCALIBRATED-未校准。
+ * NORMAL-正常 / DUE_SOON-临期 / OVERDUE-校准逾期 / SUSPENDED-挂起待修 / UNCALIBRATED-未校准。
+ * 挂起待修优先于一切到期派生，不合格挂起的挡块不会进入临期待办。
  */
 public class CalibrationStatusVO {
 
     public static final String NORMAL = "NORMAL";
+    public static final String DUE_SOON = "DUE_SOON";
     public static final String OVERDUE = "OVERDUE";
     public static final String UNCALIBRATED = "UNCALIBRATED";
     public static final String SUSPENDED = "SUSPENDED";
@@ -20,6 +22,8 @@ public class CalibrationStatusVO {
     private LocalDate validUntil;
     private LocalDate nextDueDate;
     private Integer overdueDays;
+    /** 距下次应校日期剩余天数（仅临期状态有值） */
+    private Integer daysUntilDue;
     private String suspendReason;
     private String lastCalibrator;
 
@@ -46,6 +50,9 @@ public class CalibrationStatusVO {
 
     public Integer getOverdueDays() { return overdueDays; }
     public void setOverdueDays(Integer overdueDays) { this.overdueDays = overdueDays; }
+
+    public Integer getDaysUntilDue() { return daysUntilDue; }
+    public void setDaysUntilDue(Integer daysUntilDue) { this.daysUntilDue = daysUntilDue; }
 
     public String getSuspendReason() { return suspendReason; }
     public void setSuspendReason(String suspendReason) { this.suspendReason = suspendReason; }

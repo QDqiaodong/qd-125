@@ -1,6 +1,7 @@
 package com.bufferblock.controller;
 
 import com.bufferblock.dto.CalibrationCreateDTO;
+import com.bufferblock.dto.CalibrationDueSoonVO;
 import com.bufferblock.dto.CalibrationStatusVO;
 import com.bufferblock.dto.Result;
 import com.bufferblock.entity.BlockCalibration;
@@ -29,6 +30,12 @@ public class CalibrationController {
     @GetMapping("/block/{blockId}/status")
     public Result<CalibrationStatusVO> getStatus(@PathVariable Long blockId) {
         return Result.success(calibrationService.statusOf(blockId));
+    }
+
+    /** 校准临期概览：临期条数与清单（应校日/所属产线/最近一次校准结论），实时派生 */
+    @GetMapping("/due-soon")
+    public Result<CalibrationDueSoonVO> getDueSoonOverview() {
+        return Result.success(calibrationService.getDueSoonOverview());
     }
 
     /** 校准员录入本次校准结果、有效期与下次应校日期 */

@@ -12,6 +12,16 @@
         </el-button>
       </div>
 
+      <div class="due-soon-bar" :class="{ 'due-soon-bar-active': dueSoon.count > 0 }" @click="dueSoonDialogVisible = true">
+        <div class="due-soon-bar-left">
+          <el-icon :color="dueSoon.count > 0 ? '#e6a23c' : '#67c23a'"><AlarmClock /></el-icon>
+          <span>校准临期</span>
+          <span class="due-soon-bar-count" :class="{ 'due-soon-bar-zero': dueSoon.count === 0 }">{{ dueSoon.count }}</span>
+          <span class="due-soon-bar-unit">块进入 {{ dueSoon.windowDays }} 天临期窗口（挂起待修与已逾期不计入）</span>
+        </div>
+        <el-button :type="dueSoon.count > 0 ? 'warning' : 'success'" link size="small">核对清单</el-button>
+      </div>
+
       <div class="filter-bar">
         <el-input
           v-model="filterKeyword"
@@ -65,6 +75,24 @@
           </template>
         </el-table-column>
         <el-table-column prop="lineName" label="当前所属产线" show-overflow-tooltip />
+        <el-table-column label="校准状态" width="130" align="center">
+          <template #default="scope">
+            <el-tooltip
+              v-if="scope.row.calibrationStatus === 'DUE_SOON'"
+              effect="dark"
+              placement="top"
+            >
+              <template #content>
+                <div>下次应校日：{{ scope.row.nextDueDate }}（剩 {{ scope.row.daysUntilDue }} 天）</div>
+                <div>最近一次结论：{{ scope.row.lastCalibrationResult === 'PASS' ? '合格' : '不合格' }}</div>
+              </template>
+              <el-tag type="warning" effect="dark">临期 剩{{ scope.row.daysUntilDue }}天</el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="calibrationMeta(scope.row.calibrationStatus).type" size="small">
+              {{ calibrationMeta(scope.row.calibrationStatus).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="借用状态" width="170" align="center">
           <template #default="scope">
             <el-tooltip
@@ -280,6 +308,12 @@
         </el-table-column>
       </el-table>
     </el-dialog>
+
+    <due-soon-list-dialog
+      v-model="dueSoonDialogVisible"
+      :items="dueSoon.items"
+      :window-days="dueSoon.windowDays"
+    />
   </div>
 </template>
 
@@ -296,6 +330,8 @@ import {
 } from '@/api/block'
 import { getTransfersByBlockId } from '@/api/transfer'
 import { getBorrowReservationsByBlock } from '@/api/borrow'
+import { getDueSoonCalibrations } from '@/api/calibration'
+import DueSoonListDialog from '@/components/DueSoonListDialog.vue'
 import { getLeafLines } from '@/api/line'
 import dayjs from 'dayjs'
 
@@ -332,7 +368,25 @@ const bindingHistory = ref([])
 const transferHistory = ref([])
 const borrowHistory = ref([])
 
+const dueSoon = ref({
+  windowDays: 30,
+  count: 0,
+  items: []
+})
+const dueSoonDialogVisible = ref(false)
+
 const formatTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-')
+
+const calibrationMeta = (status) => {
+  const map = {
+    NORMAL: { text: '正常', type: 'success' },
+    DUE_SOON: { text: '临期', type: 'warning' },
+    OVERDUE: { text: '已逾期', type: 'danger' },
+    SUSPENDED: { text: '挂起待修', type: 'danger' },
+    UNCALIBRATED: { text: '未校准', type: 'info' }
+  }
+  return map[status] || { text: status || '-', type: 'info' }
+}
 
 const borrowMeta = (status, overdueReturn = false) => {
   if (overdueReturn) {
@@ -366,11 +420,20 @@ const filteredBlocks = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    [allBlocks.value, specTemplates.value, leafLines.value] = await Promise.all([
+    const [blocks, templates, lines, dueSoonOverview] = await Promise.all([
       getAllBlocks(),
       getSpecTemplates(),
-      getLeafLines()
+      getLeafLines(),
+      getDueSoonCalibrations()
     ])
+    allBlocks.value = blocks
+    specTemplates.value = templates
+    leafLines.value = lines
+    dueSoon.value = {
+      windowDays: dueSoonOverview.windowDays || 30,
+      count: dueSoonOverview.count || 0,
+      items: dueSoonOverview.items || []
+    }
   } catch (e) {
     ElMessage.error('加载数据失败')
   } finally {
@@ -452,6 +515,44 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.due-soon-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  border-radius: 4px;
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+}
+.due-soon-bar.due-soon-bar-active {
+  background: #fdf6ec;
+  border-color: #faecd8;
+}
+.due-soon-bar:hover {
+  box-shadow: 0 2px 8px rgba(230, 162, 60, 0.2);
+}
+.due-soon-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+.due-soon-bar-count {
+  font-size: 20px;
+  font-weight: 700;
+  color: #e6a23c;
+}
+.due-soon-bar-count.due-soon-bar-zero {
+  color: #67c23a;
+}
+.due-soon-bar-unit {
+  color: #909399;
+  font-size: 12px;
+}
 .image-wrapper {
   display: flex;
   justify-content: center;

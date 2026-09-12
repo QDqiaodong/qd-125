@@ -131,6 +131,25 @@
     </el-row>
 
     <el-row :gutter="20" style="margin-top: 20px;">
+      <el-col :span="24">
+        <div class="page-card due-soon-banner" :class="{ 'due-soon-active': dueSoon.count > 0 }" @click="dueSoonDialogVisible = true">
+          <div class="pending-left">
+            <el-icon :size="26" :color="dueSoon.count > 0 ? '#e6a23c' : '#67c23a'"><AlarmClock /></el-icon>
+            <div>
+              <div class="pending-title">校准临期提醒</div>
+              <div class="pending-desc">下次应校日期进入 {{ dueSoon.windowDays }} 天临期窗口的在用挡块（挂起待修与已逾期不计入）；点开清单可核对应校日、所属产线与最近一次校准结论，临期挡块移交需二次确认</div>
+            </div>
+          </div>
+          <div class="pending-right">
+            <span class="due-soon-count" :class="{ 'due-soon-zero': dueSoon.count === 0 }">{{ dueSoon.count }}</span>
+            <span class="pending-unit">块临期</span>
+            <el-button :type="dueSoon.count > 0 ? 'warning' : 'success'" plain size="small">核对清单</el-button>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="12">
         <div class="page-card">
           <div class="page-header">
@@ -197,6 +216,7 @@
                 <li>挡块盘点差异闭环：缺失/错线/重复/盘盈自动标记与处理追溯</li>
                 <li>挡块借用预约：空闲挡块预约取用/归还点，占用档案标记“已约出”，取消必写原因，到点未取自动提醒</li>
                 <li>班组交班：一次性登记未还预约/待确认移交/待处理盘点差异，接班人逐条确认，交班未完成禁止新开预约</li>
+                <li>挡块校准：临期窗口提醒与待办清单，逾期/挂起禁止移交，临期移交须二次确认</li>
               </ul>
             </el-descriptions-item>
             <el-descriptions-item label="使用说明">
@@ -212,6 +232,12 @@
         </div>
       </el-col>
     </el-row>
+
+    <due-soon-list-dialog
+      v-model="dueSoonDialogVisible"
+      :items="dueSoon.items"
+      :window-days="dueSoon.windowDays"
+    />
   </div>
 </template>
 
@@ -225,6 +251,8 @@ import { getSpecTemplates } from '@/api/block'
 import { getStocktakeOverview } from '@/api/stocktake'
 import { getBorrowOverview } from '@/api/borrow'
 import { getHandoverOverview } from '@/api/handover'
+import { getDueSoonCalibrations } from '@/api/calibration'
+import DueSoonListDialog from '@/components/DueSoonListDialog.vue'
 import dayjs from 'dayjs'
 
 const router = useRouter()
@@ -256,6 +284,13 @@ const handover = ref({
   unconfirmedCount: 0
 })
 
+const dueSoon = ref({
+  windowDays: 30,
+  count: 0,
+  items: []
+})
+const dueSoonDialogVisible = ref(false)
+
 const recentTransfers = ref([])
 const lineStats = ref([])
 
@@ -286,14 +321,15 @@ const goHandover = () => {
 
 onMounted(async () => {
   try {
-    const [blocks, lines, templates, transfers, overview, borrowOverview, handoverOverview] = await Promise.all([
+    const [blocks, lines, templates, transfers, overview, borrowOverview, handoverOverview, dueSoonOverview] = await Promise.all([
       getAllBlocks(),
       getLeafLines(),
       getSpecTemplates(),
       getTransfersByDateRange(),
       getStocktakeOverview(),
       getBorrowOverview(),
-      getHandoverOverview()
+      getHandoverOverview(),
+      getDueSoonCalibrations()
     ])
 
     stocktake.value.countingBatches = overview.countingBatches
@@ -304,6 +340,11 @@ onMounted(async () => {
     borrow.value.overdueReturnCount = borrowOverview.overdueReturnCount || 0
     borrow.value.activeCount = borrowOverview.activeCount
     handover.value = handoverOverview
+    dueSoon.value = {
+      windowDays: dueSoonOverview.windowDays || 30,
+      count: dueSoonOverview.count || 0,
+      items: dueSoonOverview.items || []
+    }
     stats.value.totalLines = lines.length
     stats.value.totalBlocks = blocks.length
     stats.value.specTemplates = templates.length
@@ -451,5 +492,27 @@ onMounted(async () => {
   font-weight: 600;
   color: #67c23a;
   margin-right: 12px;
+}
+.due-soon-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-left: 4px solid #67c23a;
+  transition: box-shadow 0.2s;
+}
+.due-soon-banner.due-soon-active {
+  border-left-color: #e6a23c;
+}
+.due-soon-banner:hover {
+  box-shadow: 0 4px 14px rgba(230, 162, 60, 0.25);
+}
+.due-soon-count {
+  font-size: 26px;
+  font-weight: 700;
+  color: #e6a23c;
+}
+.due-soon-count.due-soon-zero {
+  color: #67c23a;
 }
 </style>

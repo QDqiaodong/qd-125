@@ -141,7 +141,7 @@
             <el-option
               v-for="block in availableBlocks"
               :key="block.id"
-              :label="`${block.blockCode} - ${block.adapterModel} - ${block.lineName || '未绑定'}`"
+              :label="`${block.blockCode} - ${block.adapterModel} - ${block.lineName || '未绑定'}${block.calibrationStatus === 'DUE_SOON' ? '（校准临期）' : ''}`"
               :value="block.id"
             />
           </el-select>
@@ -306,8 +306,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Printer, Plus } from '@element-plus/icons-vue'
 import {
   queryTransfers,
@@ -347,7 +347,8 @@ const createForm = reactive({
   transferReason: '',
   transferOperator: '',
   receiveOperator: '',
-  remark: ''
+  remark: '',
+  confirmDueSoon: false
 })
 
 const createRules = {
@@ -409,6 +410,12 @@ const statusMeta = (status) => {
 
 const openCreateDialog = async () => {
   createVisible.value = true
+  // 打开登记窗口时刷新挡块列表，保证临期标记与档案最新状态一致
+  try {
+    availableBlocks.value = await getAllBlocks()
+  } catch (e) {
+    // 列表刷新失败不阻断登记，提交时后端仍会校验临期二次确认
+  }
 }
 
 const resetCreateForm = () => {
@@ -421,15 +428,43 @@ const resetCreateForm = () => {
     transferReason: '',
     transferOperator: '',
     receiveOperator: '',
-    remark: ''
+    remark: '',
+    confirmDueSoon: false
   })
 }
+
+// 换选挡块后此前的临期二次确认作废，需对新挡块重新确认
+watch(() => createForm.blockId, () => {
+  createForm.confirmDueSoon = false
+})
 
 const submitCreateForm = async () => {
   if (submitting.value) return
   if (!createFormRef.value) return
   const valid = await createFormRef.value.validate().catch(() => false)
   if (!valid) return
+
+  // 校准临期的挡块必须二次确认后才能提交（后端同样强制校验 confirmDueSoon 标记）
+  const block = availableBlocks.value.find(b => b.id === createForm.blockId)
+  if (block?.calibrationStatus === 'DUE_SOON' && !createForm.confirmDueSoon) {
+    try {
+      await ElMessageBox.confirm(
+        `挡块 ${block.blockCode} 校准临期：下次应校日期 ${block.nextDueDate}（还剩 ${block.daysUntilDue} 天），` +
+        `最近一次校准结论：${block.lastCalibrationResult === 'PASS' ? '合格' : '不合格'}。` +
+        `临期挡块办理移交须二次确认，是否核对无误并继续提交？`,
+        '临期挡块移交二次确认',
+        {
+          confirmButtonText: '确认无误，继续移交',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+    } catch {
+      // 用户取消二次确认，不提交
+      return
+    }
+    createForm.confirmDueSoon = true
+  }
 
   submitting.value = true
   try {

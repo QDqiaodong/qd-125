@@ -11,6 +11,8 @@ public class TransferCreateDTO {
     private String transferOperator;
     private String receiveOperator;
     private String remark;
+    /** 临期挡块移交的二次确认标记：校准临期时必须为 true 才允许提交 */
+    private Boolean confirmDueSoon;
 
     public TransferCreateDTO() {
     }
@@ -38,4 +40,7 @@ public class TransferCreateDTO {
 
     public String getRemark() { return remark; }
     public void setRemark(String remark) { this.remark = remark; }
+
+    public Boolean getConfirmDueSoon() { return confirmDueSoon; }
+    public void setConfirmDueSoon(Boolean confirmDueSoon) { this.confirmDueSoon = confirmDueSoon; }
 }

@@ -121,6 +121,8 @@ public class BlockTransferService {
 
         // 挂起待修或校准逾期的挡块不得办理移交（不登记、不改绑定），返回明确的逾期/挂起说明
         calibrationService.assertTransferable(dto.getBlockId());
+        // 校准临期的挡块可以移交，但必须二次确认（前端弹窗确认后回传标记），防止误划
+        calibrationService.assertDueSoonConfirmed(dto.getBlockId(), dto.getConfirmDueSoon());
 
         List<BlockTransfer> pendingTransfers =
                 blockTransferRepository.findByBlockIdAndStatusOrderByCreateTimeDesc(

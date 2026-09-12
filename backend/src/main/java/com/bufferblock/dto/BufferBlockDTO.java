@@ -29,10 +29,12 @@ public class BufferBlockDTO {
     private LocalDate validUntil;
     /** 下次应校日期 */
     private LocalDate nextDueDate;
-    /** 派生校准状态：NORMAL-正常 / OVERDUE-逾期 / SUSPENDED-挂起待修 / UNCALIBRATED-未校准 */
+    /** 派生校准状态：NORMAL-正常 / DUE_SOON-临期 / OVERDUE-逾期 / SUSPENDED-挂起待修 / UNCALIBRATED-未校准 */
     private String calibrationStatus;
     /** 逾期天数（未逾期为 null） */
     private Integer overdueDays;
+    /** 距下次应校日期剩余天数（仅临期状态有值） */
+    private Integer daysUntilDue;
 
     /** 是否存在待确认移交单 */
     private Boolean pendingTransfer;
@@ -117,6 +119,9 @@ public class BufferBlockDTO {
 
     public Integer getOverdueDays() { return overdueDays; }
     public void setOverdueDays(Integer overdueDays) { this.overdueDays = overdueDays; }
+
+    public Integer getDaysUntilDue() { return daysUntilDue; }
+    public void setDaysUntilDue(Integer daysUntilDue) { this.daysUntilDue = daysUntilDue; }
 
     public Boolean getPendingTransfer() { return pendingTransfer; }
     public void setPendingTransfer(Boolean pendingTransfer) { this.pendingTransfer = pendingTransfer; }

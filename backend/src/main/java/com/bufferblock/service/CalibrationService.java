@@ -1,10 +1,12 @@
 package com.bufferblock.service;
 
 import com.bufferblock.dto.CalibrationCreateDTO;
+import com.bufferblock.dto.CalibrationDueSoonVO;
 import com.bufferblock.dto.CalibrationStatusVO;
 import com.bufferblock.entity.BlockCalibration;
 import com.bufferblock.entity.BlockLineBinding;
 import com.bufferblock.entity.BufferBlock;
+import com.bufferblock.entity.ProductionLine;
 import com.bufferblock.repository.BlockCalibrationRepository;
 import com.bufferblock.repository.BlockLineBindingRepository;
 import com.bufferblock.repository.BufferBlockRepository;
@@ -15,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,18 +35,23 @@ import java.util.Map;
 public class CalibrationService {
 
     public static final Integer DEFAULT_CYCLE_MONTHS = 12;
+    /** 临期窗口：下次应校日期距今天不超过 30 天（含当天）即进入临期待办 */
+    public static final int DUE_SOON_WINDOW_DAYS = 30;
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final BlockCalibrationRepository calibrationRepository;
     private final BufferBlockRepository blockRepository;
     private final BlockLineBindingRepository bindingRepository;
+    private final ProductionLineService productionLineService;
 
     public CalibrationService(BlockCalibrationRepository calibrationRepository,
                               BufferBlockRepository blockRepository,
-                              BlockLineBindingRepository bindingRepository) {
+                              BlockLineBindingRepository bindingRepository,
+                              ProductionLineService productionLineService) {
         this.calibrationRepository = calibrationRepository;
         this.blockRepository = blockRepository;
         this.bindingRepository = bindingRepository;
+        this.productionLineService = productionLineService;
     }
 
     public List<BlockCalibration> getHistory(Long blockId) {
@@ -143,7 +151,7 @@ public class CalibrationService {
     }
 
     /**
-     * 计算单个挡块的校准状态（挂起优先于逾期，未校准单列）。
+     * 计算单个挡块的校准状态（挂起优先于逾期，逾期优先于临期，未校准单列）。
      */
     public CalibrationStatusVO statusOf(Long blockId) {
         BufferBlock block = blockRepository.findById(blockId).orElse(null);
@@ -178,6 +186,7 @@ public class CalibrationService {
         CalibrationStatusVO vo = new CalibrationStatusVO();
         vo.setBlockId(block.getId());
         if (BufferBlock.STATUS_SUSPENDED.equals(block.getServiceStatus())) {
+            // 挂起待修优先级最高：不合格挂起的挡块不进入临期/逾期等待办派生
             vo.setStatus(CalibrationStatusVO.SUSPENDED);
             vo.setSuspendReason(block.getSuspendReason());
         } else if (latest == null) {
@@ -185,6 +194,10 @@ public class CalibrationService {
         } else if (latest.getNextDueDate().isBefore(today)) {
             vo.setStatus(CalibrationStatusVO.OVERDUE);
             vo.setOverdueDays((int) ChronoUnit.DAYS.between(latest.getNextDueDate(), today));
+        } else if (!latest.getNextDueDate().isAfter(today.plusDays(DUE_SOON_WINDOW_DAYS))) {
+            // 应校日进入临期窗口（含当天到期），单独标记便于首页/档案汇总待办
+            vo.setStatus(CalibrationStatusVO.DUE_SOON);
+            vo.setDaysUntilDue((int) ChronoUnit.DAYS.between(today, latest.getNextDueDate()));
         } else {
             vo.setStatus(CalibrationStatusVO.NORMAL);
         }
@@ -196,6 +209,48 @@ public class CalibrationService {
             vo.setLastCalibrator(latest.getCalibrator());
         }
         return vo;
+    }
+
+    /**
+     * 校准临期概览：全部在用挡块中下次应校日期进入临期窗口的清单，
+     * 按应校日升序（最急的在前）。条数与清单同源实时派生，刷新/重进页面保持一致；
+     * 挂起待修、已逾期、未校准的挡块均不计入。
+     */
+    public CalibrationDueSoonVO getDueSoonOverview() {
+        List<BufferBlock> blocks = blockRepository.findAll();
+        Map<Long, CalibrationStatusVO> statusMap = statusMapOfBlocks(blocks);
+
+        CalibrationDueSoonVO overview = new CalibrationDueSoonVO();
+        overview.setWindowDays(DUE_SOON_WINDOW_DAYS);
+        for (BufferBlock block : blocks) {
+            CalibrationStatusVO status = statusMap.get(block.getId());
+            if (status == null || !CalibrationStatusVO.DUE_SOON.equals(status.getStatus())) {
+                continue;
+            }
+            CalibrationDueSoonVO.Item item = new CalibrationDueSoonVO.Item();
+            item.setBlockId(block.getId());
+            item.setBlockCode(block.getBlockCode());
+            item.setAdapterModel(block.getAdapterModel());
+            BlockLineBinding binding = bindingRepository
+                    .findByBlockIdAndIsCurrent(block.getId(), 1).orElse(null);
+            if (binding != null) {
+                item.setLineId(binding.getLineId());
+                ProductionLine line = productionLineService.getById(binding.getLineId());
+                if (line != null) {
+                    item.setLineName(line.getLineName());
+                }
+            }
+            item.setNextDueDate(status.getNextDueDate());
+            item.setDaysUntilDue(status.getDaysUntilDue());
+            item.setLastResult(status.getLastResult());
+            item.setLastCalibrationDate(status.getLastCalibrationDate());
+            item.setLastCalibrator(status.getLastCalibrator());
+            overview.getItems().add(item);
+        }
+        overview.getItems().sort(Comparator.comparing(CalibrationDueSoonVO.Item::getNextDueDate)
+                .thenComparing(CalibrationDueSoonVO.Item::getBlockId));
+        overview.setCount(overview.getItems().size());
+        return overview;
     }
 
     /**
@@ -214,6 +269,24 @@ public class CalibrationService {
         if (CalibrationStatusVO.OVERDUE.equals(status.getStatus())) {
             throw new RuntimeException("该挡块校准已逾期（下次应校日期 " + status.getNextDueDate()
                     + "，逾期 " + status.getOverdueDays() + " 天），须先完成校准并合格后才能办理移交，产线绑定不予变更");
+        }
+    }
+
+    /**
+     * 临期挡块移交二次确认闸门：进入临期窗口的挡块办理移交，
+     * 必须显式携带二次确认标记（前端弹窗确认后回传），否则拒绝提交。
+     * 挂起/逾期由 {@link #assertTransferable(Long)} 先行拦截，这里只处理临期。
+     */
+    public void assertDueSoonConfirmed(Long blockId, Boolean confirmDueSoon) {
+        CalibrationStatusVO status = statusOf(blockId);
+        if (status == null) {
+            return;
+        }
+        if (CalibrationStatusVO.DUE_SOON.equals(status.getStatus())
+                && !Boolean.TRUE.equals(confirmDueSoon)) {
+            throw new RuntimeException("该挡块校准临期（下次应校日期 " + status.getNextDueDate()
+                    + "，还剩 " + status.getDaysUntilDue()
+                    + " 天），办理移交须二次确认后方可提交，请核对校准状态后重新登记");
         }
     }
 

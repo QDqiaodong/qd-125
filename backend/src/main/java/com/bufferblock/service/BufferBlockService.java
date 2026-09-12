@@ -293,6 +293,7 @@ public class BufferBlockService {
             dto.setValidUntil(status.getValidUntil());
             dto.setNextDueDate(status.getNextDueDate());
             dto.setOverdueDays(status.getOverdueDays());
+            dto.setDaysUntilDue(status.getDaysUntilDue());
         }
         return dto;
     }
