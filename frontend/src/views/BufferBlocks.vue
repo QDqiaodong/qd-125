@@ -247,9 +247,16 @@
       <el-divider content-position="left">移交记录</el-divider>
       <el-table :data="transferHistory" stripe size="small">
         <el-table-column prop="transferNo" label="移交单号" width="180" />
-        <el-table-column prop="fromLineName" label="移出产线" />
-        <el-table-column prop="toLineName" label="移入产线" />
-        <el-table-column prop="transferDate" label="移交日期" width="120" />
+        <el-table-column prop="fromLineName" label="移出产线" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="toLineName" label="移入产线" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="transferDate" label="移交日期" width="110" />
+        <el-table-column label="状态" width="85" align="center">
+          <template #default="scope">
+            <el-tag :type="transferStatusMeta(scope.row.status).type" size="small">
+              {{ transferStatusMeta(scope.row.status).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="transferOperator" label="操作人" width="100" />
       </el-table>
 
@@ -384,6 +391,15 @@ const calibrationMeta = (status) => {
     OVERDUE: { text: '已逾期', type: 'danger' },
     SUSPENDED: { text: '挂起待修', type: 'danger' },
     UNCALIBRATED: { text: '未校准', type: 'info' }
+  }
+  return map[status] || { text: status || '-', type: 'info' }
+}
+
+const transferStatusMeta = (status) => {
+  const map = {
+    PENDING: { text: '待确认', type: 'warning' },
+    CONFIRMED: { text: '已确认', type: 'success' },
+    REJECTED: { text: '已驳回', type: 'danger' }
   }
   return map[status] || { text: status || '-', type: 'info' }
 }

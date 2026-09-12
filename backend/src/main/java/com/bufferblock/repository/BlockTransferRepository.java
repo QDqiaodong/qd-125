@@ -1,18 +1,28 @@
 package com.bufferblock.repository;
 
 import com.bufferblock.entity.BlockTransfer;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface BlockTransferRepository extends JpaRepository<BlockTransfer, Long> {
+
+    /**
+     * 确认/驳回处理前锁定移交单，串行化并发处理，避免确认先改绑定后驳回又覆盖状态。
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM BlockTransfer t WHERE t.id = :id")
+    Optional<BlockTransfer> findByIdForUpdate(@Param("id") Long id);
 
     /** 移交确认列表共用的筛选条件 */
     String CONFIRM_FILTER = "SELECT t FROM BlockTransfer t WHERE " +

@@ -290,8 +290,11 @@ public class BlockTransferService {
         return transferFlowRecordRepository.findByTransferIdOrderByCreateTimeAscIdAsc(transferId);
     }
 
+    /**
+     * 先锁定移交单再校验状态：确认与驳回互斥，避免并发处理出现“台账已驳回但确认已改绑定”的分叉。
+     */
     private BlockTransfer getPendingTransfer(Long id) {
-        BlockTransfer transfer = blockTransferRepository.findById(id)
+        BlockTransfer transfer = blockTransferRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("移交记录不存在"));
         if (!BlockTransfer.STATUS_PENDING.equals(transfer.getStatus())) {
             throw new RuntimeException("仅待确认状态的移交单可处理，当前状态：" + statusText(transfer.getStatus()));
