@@ -2,6 +2,7 @@ package com.bufferblock.service;
 
 import com.bufferblock.dto.BufferBlockDTO;
 import com.bufferblock.dto.CalibrationStatusVO;
+import com.bufferblock.entity.BlockBorrowReservation;
 import com.bufferblock.entity.BlockLineBinding;
 import com.bufferblock.entity.BlockTransfer;
 import com.bufferblock.entity.BufferBlock;
@@ -9,6 +10,7 @@ import com.bufferblock.entity.ProductionLine;
 import com.bufferblock.repository.BlockLineBindingRepository;
 import com.bufferblock.repository.BlockTransferRepository;
 import com.bufferblock.repository.BufferBlockRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -29,31 +31,53 @@ public class BufferBlockService {
     private final BlockTransferRepository blockTransferRepository;
     private final ProductionLineService productionLineService;
     private final CalibrationService calibrationService;
+    /**
+     * 借用预约服务反向依赖本服务（锁档、查绑定），这里用 ObjectProvider 延迟解析，
+     * 打破两个服务之间的构造器循环依赖。
+     */
+    private final ObjectProvider<BorrowReservationService> borrowReservationServiceProvider;
 
     public BufferBlockService(BufferBlockRepository bufferBlockRepository,
                               BlockLineBindingRepository blockLineBindingRepository,
                               BlockTransferRepository blockTransferRepository,
                               ProductionLineService productionLineService,
-                              CalibrationService calibrationService) {
+                              CalibrationService calibrationService,
+                              ObjectProvider<BorrowReservationService> borrowReservationServiceProvider) {
         this.bufferBlockRepository = bufferBlockRepository;
         this.blockLineBindingRepository = blockLineBindingRepository;
         this.blockTransferRepository = blockTransferRepository;
         this.productionLineService = productionLineService;
         this.calibrationService = calibrationService;
+        this.borrowReservationServiceProvider = borrowReservationServiceProvider;
     }
 
     public List<BufferBlockDTO> getAllBlocks() {
         List<BufferBlock> blocks = bufferBlockRepository.findAll();
         Map<Long, CalibrationStatusVO> statusMap = calibrationService.statusMapOfBlocks(blocks);
         Map<Long, String> pendingMap = pendingTransferNoMap();
+        Map<Long, BlockBorrowReservation> borrowMap =
+                borrowReservationServiceProvider.getObject().activeReservationMap();
         return blocks.stream()
-                .map(block -> withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap))
+                .map(block -> withBorrowMark(
+                        withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap),
+                        borrowMap))
                 .collect(Collectors.toList());
     }
 
     public BufferBlockDTO getById(Long id) {
         BufferBlock block = bufferBlockRepository.findById(id).orElse(null);
-        return block != null ? convertToDTO(block, calibrationService.statusOf(id)) : null;
+        if (block == null) {
+            return null;
+        }
+        BufferBlockDTO dto = convertToDTO(block, calibrationService.statusOf(id));
+        // 单挡块详情同样叠加借用占用标记（含空闲时显式置 false），保证档案与预约状态口径一致
+        Map<Long, BlockBorrowReservation> borrowMap = new HashMap<>();
+        BlockBorrowReservation reservation =
+                borrowReservationServiceProvider.getObject().activeReservationMap().get(id);
+        if (reservation != null) {
+            borrowMap.put(id, reservation);
+        }
+        return withBorrowMark(dto, borrowMap);
     }
 
     public BufferBlock getEntityById(Long id) {
@@ -152,11 +176,30 @@ public class BufferBlockService {
         }
         Map<Long, CalibrationStatusVO> statusMap = calibrationService.statusMapOfBlocks(blocks);
         Map<Long, String> pendingMap = pendingTransferNoMap();
+        Map<Long, BlockBorrowReservation> borrowMap =
+                borrowReservationServiceProvider.getObject().activeReservationMap();
         List<BufferBlockDTO> result = new ArrayList<>();
         for (BufferBlock block : blocks) {
-            result.add(withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap));
+            result.add(withBorrowMark(
+                    withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap),
+                    borrowMap));
         }
         return result;
+    }
+
+    /**
+     * 挡块是否存在待确认移交单（借用预约登记时排除这类挡块）。
+     */
+    public boolean hasPendingTransfer(Long blockId) {
+        return !blockTransferRepository.findByBlockIdAndStatusOrderByCreateTimeDesc(
+                blockId, BlockTransfer.STATUS_PENDING).isEmpty();
+    }
+
+    /**
+     * 挡块是否处于借用占用中（已预约/已取走/逾时未取）。
+     */
+    public boolean hasActiveBorrow(Long blockId) {
+        return borrowReservationServiceProvider.getObject().activeReservationMap().containsKey(blockId);
     }
 
     /**
@@ -174,6 +217,23 @@ public class BufferBlockService {
         String transferNo = pendingMap.get(dto.getId());
         dto.setPendingTransfer(transferNo != null);
         dto.setPendingTransferNo(transferNo);
+        return dto;
+    }
+
+    /**
+     * 占用期间（已预约/已取走/逾时未取）在档案上叠加“已约出”标记与预约单号、
+     * 约定取用时间、借用班组、归还点；取消/归还后该标记自然消失。
+     */
+    private BufferBlockDTO withBorrowMark(BufferBlockDTO dto, Map<Long, BlockBorrowReservation> borrowMap) {
+        BlockBorrowReservation reservation = borrowMap.get(dto.getId());
+        dto.setBorrowedOut(reservation != null);
+        if (reservation != null) {
+            dto.setBorrowReservationNo(reservation.getReservationNo());
+            dto.setBorrowStatus(reservation.getStatus());
+            dto.setBorrowTeamName(reservation.getTeamName());
+            dto.setBorrowPickupTime(reservation.getPickupTime());
+            dto.setBorrowReturnPoint(reservation.getReturnPoint());
+        }
         return dto;
     }
 

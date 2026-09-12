@@ -65,6 +65,25 @@
           </template>
         </el-table-column>
         <el-table-column prop="lineName" label="当前所属产线" show-overflow-tooltip />
+        <el-table-column label="借用状态" width="170" align="center">
+          <template #default="scope">
+            <el-tooltip
+              v-if="scope.row.borrowedOut"
+              effect="dark"
+              placement="top"
+            >
+              <template #content>
+                <div>{{ scope.row.borrowReservationNo }} · {{ scope.row.borrowTeamName }}</div>
+                <div>约定取用：{{ formatTime(scope.row.borrowPickupTime) }}</div>
+                <div>归还点：{{ scope.row.borrowReturnPoint }}</div>
+              </template>
+              <el-tag :type="borrowMeta(scope.row.borrowStatus).type" effect="dark">
+                {{ borrowMeta(scope.row.borrowStatus).text }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else type="success" effect="plain">空闲可约</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="createTime" label="建档时间" width="180" />
         <el-table-column label="操作" width="200" fixed="right" align="center">
           <template #default="scope">
@@ -139,6 +158,16 @@
         <el-descriptions-item label="适配输送机型" :span="2">{{ currentDetail.adapterModel }}</el-descriptions-item>
         <el-descriptions-item label="厚度规格">{{ currentDetail.thickness }} mm</el-descriptions-item>
         <el-descriptions-item label="当前产线">{{ currentDetail.lineName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="借用状态">
+          <el-tag v-if="currentDetail.borrowedOut" :type="borrowMeta(currentDetail.borrowStatus).type" effect="dark">
+            {{ borrowMeta(currentDetail.borrowStatus).text }}
+          </el-tag>
+          <el-tag v-else type="success" effect="plain">空闲可约</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item v-if="currentDetail.borrowedOut" label="借用预约" :span="2">
+          {{ currentDetail.borrowReservationNo }} · {{ currentDetail.borrowTeamName }}，
+          约定取用 {{ formatTime(currentDetail.borrowPickupTime) }}，归还点：{{ currentDetail.borrowReturnPoint }}
+        </el-descriptions-item>
         <el-descriptions-item label="建档时间">{{ currentDetail.createTime }}</el-descriptions-item>
         <el-descriptions-item label="实物图片" :span="2">
           <div v-if="currentDetail.imageUrl" class="detail-image">
@@ -180,6 +209,23 @@
         <el-table-column prop="transferDate" label="移交日期" width="120" />
         <el-table-column prop="transferOperator" label="操作人" width="100" />
       </el-table>
+
+      <el-divider content-position="left">借用记录</el-divider>
+      <el-table :data="borrowHistory" stripe size="small">
+        <el-table-column prop="reservationNo" label="预约单号" width="180" />
+        <el-table-column prop="teamName" label="借用班组" width="140" />
+        <el-table-column label="约定取用" width="170">
+          <template #default="scope">{{ formatTime(scope.row.pickupTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="returnPoint" label="归还点" show-overflow-tooltip />
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="scope">
+            <el-tag :type="borrowMeta(scope.row.status).type" size="small">
+              {{ borrowMeta(scope.row.status).text }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-dialog>
   </div>
 </template>
@@ -196,7 +242,9 @@ import {
   getBlockBindings
 } from '@/api/block'
 import { getTransfersByBlockId } from '@/api/transfer'
+import { getBorrowReservationsByBlock } from '@/api/borrow'
 import { getLeafLines } from '@/api/line'
+import dayjs from 'dayjs'
 
 const loading = ref(false)
 const allBlocks = ref([])
@@ -229,6 +277,18 @@ const detailVisible = ref(false)
 const currentDetail = ref(null)
 const bindingHistory = ref([])
 const transferHistory = ref([])
+const borrowHistory = ref([])
+
+const formatTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-')
+
+const borrowMeta = (status) => {
+  const map = {
+    RESERVED: { text: '已约出', type: 'warning' },
+    PICKED_UP: { text: '已取走', type: 'danger' },
+    OVERDUE: { text: '逾时未取', type: 'danger' }
+  }
+  return map[status] || { text: '占用中', type: 'warning' }
+}
 
 const filteredBlocks = computed(() => {
   let result = allBlocks.value
@@ -318,9 +378,10 @@ const viewDetail = async (row) => {
   currentDetail.value = row
   detailVisible.value = true
   try {
-    [bindingHistory.value, transferHistory.value] = await Promise.all([
+    [bindingHistory.value, transferHistory.value, borrowHistory.value] = await Promise.all([
       getBlockBindings(row.id),
-      getTransfersByBlockId(row.id)
+      getTransfersByBlockId(row.id),
+      getBorrowReservationsByBlock(row.id)
     ])
   } catch (e) {
     // ignore

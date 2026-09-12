@@ -129,6 +129,11 @@ public class BlockTransferService {
             throw new RuntimeException("该挡块已存在待确认的移交单（" + pendingTransfers.get(0).getTransferNo() + "），请等待接收方处理");
         }
 
+        // 借用占用中的挡块（已预约/已取走/逾时未取）不得登记移交，避免“已约出”期间实物被划转
+        if (bufferBlockService.hasActiveBorrow(dto.getBlockId())) {
+            throw new RuntimeException("该挡块存在占用中的借用预约，请先取走归还或取消预约后再办理移交");
+        }
+
         BlockTransfer transfer = new BlockTransfer();
         transfer.setTransferNo(transferNumberService.nextTransferNo(transferDate));
         transfer.setBlockId(dto.getBlockId());

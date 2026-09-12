@@ -18,3 +18,9 @@ spring:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
     default-property-inclusion: non_null
+
+# 借用逾期提醒由测试显式触发，关闭后台定时扫描以保证结果确定
+app:
+  borrow:
+    overdue-scheduler:
+      enabled: false

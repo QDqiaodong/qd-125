@@ -2,6 +2,7 @@ package com.bufferblock.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 public class BufferBlockDTO {
     private Long id;
@@ -37,6 +38,19 @@ public class BufferBlockDTO {
     private Boolean pendingTransfer;
     /** 待确认移交单号 */
     private String pendingTransferNo;
+
+    /** 是否处于借用占用中（已预约/已取走/逾时未取），档案上显示“已约出” */
+    private Boolean borrowedOut;
+    /** 占用中的借用预约单号 */
+    private String borrowReservationNo;
+    /** 借用预约状态：RESERVED/PICKED_UP/OVERDUE */
+    private String borrowStatus;
+    /** 借用班组 */
+    private String borrowTeamName;
+    /** 约定取用时间 */
+    private LocalDateTime borrowPickupTime;
+    /** 约定归还点 */
+    private String borrowReturnPoint;
 
     public BufferBlockDTO() {
     }
@@ -103,4 +117,22 @@ public class BufferBlockDTO {
 
     public String getPendingTransferNo() { return pendingTransferNo; }
     public void setPendingTransferNo(String pendingTransferNo) { this.pendingTransferNo = pendingTransferNo; }
+
+    public Boolean getBorrowedOut() { return borrowedOut; }
+    public void setBorrowedOut(Boolean borrowedOut) { this.borrowedOut = borrowedOut; }
+
+    public String getBorrowReservationNo() { return borrowReservationNo; }
+    public void setBorrowReservationNo(String borrowReservationNo) { this.borrowReservationNo = borrowReservationNo; }
+
+    public String getBorrowStatus() { return borrowStatus; }
+    public void setBorrowStatus(String borrowStatus) { this.borrowStatus = borrowStatus; }
+
+    public String getBorrowTeamName() { return borrowTeamName; }
+    public void setBorrowTeamName(String borrowTeamName) { this.borrowTeamName = borrowTeamName; }
+
+    public LocalDateTime getBorrowPickupTime() { return borrowPickupTime; }
+    public void setBorrowPickupTime(LocalDateTime borrowPickupTime) { this.borrowPickupTime = borrowPickupTime; }
+
+    public String getBorrowReturnPoint() { return borrowReturnPoint; }
+    public void setBorrowReturnPoint(String borrowReturnPoint) { this.borrowReturnPoint = borrowReturnPoint; }
 }

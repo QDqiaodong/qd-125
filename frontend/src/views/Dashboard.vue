@@ -80,6 +80,29 @@
     </el-row>
 
     <el-row :gutter="20" style="margin-top: 20px;">
+      <el-col :span="24">
+        <div class="page-card borrow-banner" :class="{ 'borrow-overdue': borrow.overdueCount > 0 }" @click="goBorrow">
+          <div class="pending-left">
+            <el-icon :size="26" :color="borrow.overdueCount > 0 ? '#f56c6c' : '#722ed1'"><Calendar /></el-icon>
+            <div>
+              <div class="pending-title">挡块借用预约</div>
+              <div class="pending-desc">班组可预约空闲挡块、约定取用时段与归还点，占用期间档案标记“已约出”；过点未取自动提醒</div>
+            </div>
+          </div>
+          <div class="pending-right">
+            <span class="borrow-count">{{ borrow.activeCount }}</span>
+            <span class="pending-unit">块档案已约出 ·</span>
+            <span class="borrow-reserved">{{ borrow.reservedCount }}</span>
+            <span class="pending-unit">单待取 ·</span>
+            <span :class="borrow.overdueCount > 0 ? 'stocktake-pending' : 'borrow-count'">{{ borrow.overdueCount }}</span>
+            <span class="pending-unit">单逾时未取</span>
+            <el-button :type="borrow.overdueCount > 0 ? 'danger' : 'primary'" plain size="small">前往预约</el-button>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="12">
         <div class="page-card">
           <div class="page-header">
@@ -144,6 +167,7 @@
                 <li>接收方确认/驳回，确认后更新产线绑定</li>
                 <li>等待时长、流转记录与确认回执打印</li>
                 <li>挡块盘点差异闭环：缺失/错线/重复/盘盈自动标记与处理追溯</li>
+                <li>挡块借用预约：空闲挡块预约取用/归还点，占用档案标记“已约出”，取消必写原因，到点未取自动提醒</li>
               </ul>
             </el-descriptions-item>
             <el-descriptions-item label="使用说明">
@@ -170,6 +194,7 @@ import { getLeafLines } from '@/api/line'
 import { getTransfersByDateRange, getTransfersByBlockId } from '@/api/transfer'
 import { getSpecTemplates } from '@/api/block'
 import { getStocktakeOverview } from '@/api/stocktake'
+import { getBorrowOverview } from '@/api/borrow'
 import dayjs from 'dayjs'
 
 const router = useRouter()
@@ -185,6 +210,13 @@ const stats = ref({
 const stocktake = ref({
   countingBatches: 0,
   pendingDiscrepancies: 0
+})
+
+const borrow = ref({
+  reservedCount: 0,
+  pickedUpCount: 0,
+  overdueCount: 0,
+  activeCount: 0
 })
 
 const recentTransfers = ref([])
@@ -207,18 +239,27 @@ const goStocktake = () => {
   router.push('/stocktakes')
 }
 
+const goBorrow = () => {
+  router.push('/borrow')
+}
+
 onMounted(async () => {
   try {
-    const [blocks, lines, templates, transfers, overview] = await Promise.all([
+    const [blocks, lines, templates, transfers, overview, borrowOverview] = await Promise.all([
       getAllBlocks(),
       getLeafLines(),
       getSpecTemplates(),
       getTransfersByDateRange(),
-      getStocktakeOverview()
+      getStocktakeOverview(),
+      getBorrowOverview()
     ])
 
     stocktake.value.countingBatches = overview.countingBatches
     stocktake.value.pendingDiscrepancies = overview.pendingDiscrepancies
+    borrow.value.reservedCount = borrowOverview.reservedCount
+    borrow.value.pickedUpCount = borrowOverview.pickedUpCount
+    borrow.value.overdueCount = borrowOverview.overdueCount
+    borrow.value.activeCount = borrowOverview.activeCount
     stats.value.totalLines = lines.length
     stats.value.totalBlocks = blocks.length
     stats.value.specTemplates = templates.length
@@ -317,5 +358,29 @@ onMounted(async () => {
   font-size: 26px;
   font-weight: 700;
   color: #f56c6c;
+}
+.borrow-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-left: 4px solid #722ed1;
+  transition: box-shadow 0.2s;
+}
+.borrow-banner:hover {
+  box-shadow: 0 4px 14px rgba(114, 46, 209, 0.25);
+}
+.borrow-banner.borrow-overdue {
+  border-left-color: #f56c6c;
+}
+.borrow-count {
+  font-size: 26px;
+  font-weight: 700;
+  color: #722ed1;
+}
+.borrow-reserved {
+  font-size: 26px;
+  font-weight: 700;
+  color: #e6a23c;
 }
 </style>

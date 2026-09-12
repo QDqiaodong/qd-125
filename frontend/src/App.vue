@@ -39,6 +39,10 @@
             <el-icon><DocumentChecked /></el-icon>
             <span>挡块盘点差异</span>
           </el-menu-item>
+          <el-menu-item index="/borrow">
+            <el-icon><Calendar /></el-icon>
+            <span>挡块借用预约</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main class="app-main">
