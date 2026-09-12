@@ -19,10 +19,18 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class BlockTransferService {
+
+    /** 等待时长排序：最长优先 */
+    public static final String WAIT_SORT_LONGEST_FIRST = "LONGEST_FIRST";
+    /** 等待时长排序：最短优先 */
+    public static final String WAIT_SORT_SHORTEST_FIRST = "SHORTEST_FIRST";
+    /** 积压标记阈值：待确认单等待达到 24 小时视为压得太久，列表与导出统一口径 */
+    public static final long LONG_WAIT_THRESHOLD_MINUTES = 24 * 60;
 
     private final BlockTransferRepository blockTransferRepository;
     private final TransferFlowRecordRepository transferFlowRecordRepository;
@@ -47,18 +55,39 @@ public class BlockTransferService {
 
     public Page<BlockTransfer> queryTransfers(TransferQueryDTO query) {
         Pageable pageable = PageRequest.of(query.getPage() - 1, query.getSize());
-        Page<BlockTransfer> page = blockTransferRepository.findForConfirm(
-                query.getStartDate(),
-                query.getEndDate(),
-                query.getFromLineId(),
-                query.getToLineId(),
-                query.getLineId(),
-                query.getStatus(),
-                query.getBlockCode(),
-                pageable
-        );
+        Page<BlockTransfer> page = queryForConfirm(query, pageable);
         page.getContent().forEach(this::enrichTransfer);
         return page;
+    }
+
+    /**
+     * 按当前筛选与等待时长排序导出全部结果（不分页），顺序与列表页保持一致
+     */
+    public List<BlockTransfer> listForExport(TransferQueryDTO query) {
+        List<BlockTransfer> transfers = queryForConfirm(query, Pageable.unpaged()).getContent();
+        transfers.forEach(this::enrichTransfer);
+        return transfers;
+    }
+
+    /**
+     * 移交确认列表统一查询入口：指定等待时长排序时按等待时长排（待确认为实时等待，
+     * 已办理定格在办理时刻），否则保持默认的移交日期/登记时间倒序
+     */
+    private Page<BlockTransfer> queryForConfirm(TransferQueryDTO query, Pageable pageable) {
+        String waitSort = query.getWaitSort();
+        if (WAIT_SORT_LONGEST_FIRST.equals(waitSort)) {
+            return blockTransferRepository.findForConfirmWaitLongestFirst(
+                    query.getStartDate(), query.getEndDate(), query.getFromLineId(), query.getToLineId(),
+                    query.getLineId(), query.getStatus(), query.getBlockCode(), pageable);
+        }
+        if (WAIT_SORT_SHORTEST_FIRST.equals(waitSort)) {
+            return blockTransferRepository.findForConfirmWaitShortestFirst(
+                    query.getStartDate(), query.getEndDate(), query.getFromLineId(), query.getToLineId(),
+                    query.getLineId(), query.getStatus(), query.getBlockCode(), pageable);
+        }
+        return blockTransferRepository.findForConfirm(
+                query.getStartDate(), query.getEndDate(), query.getFromLineId(), query.getToLineId(),
+                query.getLineId(), query.getStatus(), query.getBlockCode(), pageable);
     }
 
     public List<BlockTransfer> getTransfersByDateRange(LocalDate startDate, LocalDate endDate) {
@@ -291,8 +320,10 @@ public class BlockTransferService {
         if (transfer.getCreateTime() != null) {
             if (BlockTransfer.STATUS_PENDING.equals(transfer.getStatus())) {
                 // 待确认单：从登记时刻到当前时刻的实时等待时长
-                transfer.setWaitingDuration(formatDuration(
-                        Duration.between(transfer.getCreateTime(), LocalDateTime.now())));
+                Duration waiting = Duration.between(transfer.getCreateTime(), LocalDateTime.now());
+                transfer.setWaitingDuration(formatDuration(waiting));
+                // 压得太久的待确认单给出积压标记，列表与导出共用同一阈值口径
+                transfer.setLongWaiting(waiting.toMinutes() >= LONG_WAIT_THRESHOLD_MINUTES);
             } else {
                 // 已确认/已驳回：等待时长停在办理时刻，不再随当前时间继续增长
                 LocalDateTime endTime = transfer.getHandleTime() != null
@@ -300,7 +331,10 @@ public class BlockTransferService {
                         : transfer.getUpdateTime();
                 transfer.setWaitingDuration(formatDuration(
                         Duration.between(transfer.getCreateTime(), endTime)));
+                transfer.setLongWaiting(false);
             }
+        } else {
+            transfer.setLongWaiting(false);
         }
 
         CalibrationStatusVO calibrationStatus = calibrationService.statusOf(transfer.getBlockId());
@@ -334,6 +368,41 @@ public class BlockTransferService {
             sb.append(minutes).append("分钟");
         }
         return sb.toString();
+    }
+
+    /** 导出列序，与移交确认列表展示口径一致 */
+    public static String[] exportHeaders() {
+        return new String[] {
+                "移交单号", "挡块编号", "适配机型", "厚度(mm)", "规格模板",
+                "原归属产线", "目标产线", "移交日期", "状态", "等待时长", "积压标记",
+                "登记时间", "处理时间", "移交人", "接收方处理人", "移交原因", "处理说明"
+        };
+    }
+
+    public List<String> exportRow(BlockTransfer t) {
+        List<String> row = new ArrayList<>();
+        row.add(t.getTransferNo());
+        row.add(t.getBlockCode());
+        row.add(t.getAdapterModel());
+        row.add(t.getThickness() == null ? "" : t.getThickness().toPlainString());
+        row.add(t.getSpecTemplate());
+        row.add(t.getFromLineName());
+        row.add(t.getToLineName());
+        row.add(t.getTransferDate() == null ? "" : t.getTransferDate().toString());
+        row.add(statusText(t.getStatus()));
+        row.add(t.getWaitingDuration());
+        row.add(Boolean.TRUE.equals(t.getLongWaiting()) ? "积压过久" : "");
+        row.add(formatDateTime(t.getCreateTime()));
+        row.add(formatDateTime(t.getHandleTime()));
+        row.add(t.getTransferOperator());
+        row.add(t.getReceiveOperator());
+        row.add(t.getTransferReason());
+        row.add(t.getHandleNote());
+        return row;
+    }
+
+    private String formatDateTime(LocalDateTime time) {
+        return time == null ? "" : time.toString().replace('T', ' ');
     }
 
     public static String statusText(String status) {

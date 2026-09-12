@@ -97,6 +97,10 @@ public class BlockTransfer {
     @Transient
     private String waitingDuration;
 
+    /** 积压标记：待确认且等待时长达到阈值（见 BlockTransferService.LONG_WAIT_THRESHOLD_MINUTES） */
+    @Transient
+    private Boolean longWaiting;
+
     @Transient
     private String calibrationStatus;
 
@@ -186,6 +190,9 @@ public class BlockTransfer {
 
     public String getWaitingDuration() { return waitingDuration; }
     public void setWaitingDuration(String waitingDuration) { this.waitingDuration = waitingDuration; }
+
+    public Boolean getLongWaiting() { return longWaiting; }
+    public void setLongWaiting(Boolean longWaiting) { this.longWaiting = longWaiting; }
 
     public String getCalibrationStatus() { return calibrationStatus; }
     public void setCalibrationStatus(String calibrationStatus) { this.calibrationStatus = calibrationStatus; }

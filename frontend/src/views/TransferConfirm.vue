@@ -7,6 +7,10 @@
           移交确认
         </div>
         <div class="header-actions">
+          <el-button type="primary" plain @click="doExport" :loading="exporting">
+            <el-icon><Download /></el-icon>
+            导出结果
+          </el-button>
           <el-button @click="loadData">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -65,6 +69,14 @@
           <el-icon><RefreshLeft /></el-icon>
           重置
         </el-button>
+        <el-radio-group
+          v-model="query.waitSort"
+          class="wait-sort-group"
+          @change="handleSearch"
+        >
+          <el-radio-button value="LONGEST_FIRST">等待最长优先</el-radio-button>
+          <el-radio-button value="SHORTEST_FIRST">等待最短优先</el-radio-button>
+        </el-radio-group>
       </div>
 
       <el-alert
@@ -72,10 +84,10 @@
         type="info"
         :closable="false"
         show-icon
-        title="移交登记后进入“待确认”状态；接收方确认接收后系统才更新挡块当前产线绑定，驳回则保留原归属。"
+        title="移交登记后进入“待确认”状态；接收方确认接收后系统才更新挡块当前产线绑定，驳回则保留原归属。待确认单按等待时长排队（默认最长优先），等待超过 24 小时的单据将醒目标记为“积压过久”。"
       />
 
-      <el-table :data="tableData" stripe v-loading="loading" row-key="id">
+      <el-table :data="tableData" stripe v-loading="loading" row-key="id" :row-class-name="rowClassName">
         <el-table-column type="index" label="序号" width="60" align="center" />
         <el-table-column prop="transferNo" label="移交单号" width="175">
           <template #default="scope">
@@ -105,31 +117,45 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="等待时长" width="130" align="center">
+        <el-table-column label="等待时长" width="150" align="center">
           <template #default="scope">
-            <el-tooltip
-              v-if="scope.row.status === 'PENDING'"
-              :content="`登记于 ${scope.row.createTime}`"
-              placement="top"
-            >
-              <el-tag type="danger" effect="plain" size="small">
-                <el-icon style="vertical-align: -2px;"><Timer /></el-icon>
-                {{ scope.row.waitingDuration }}
-              </el-tag>
-            </el-tooltip>
-            <el-tooltip
-              v-else
-              :content="`办理于 ${formatTime(scope.row.handleTime)}，等待时长已定格`"
-              placement="top"
-            >
-              <el-tag
-                :type="scope.row.status === 'CONFIRMED' ? 'success' : 'info'"
-                effect="plain"
-                size="small"
+            <div class="wait-cell">
+              <el-tooltip
+                v-if="scope.row.status === 'PENDING'"
+                :content="scope.row.longWaiting
+                  ? `登记于 ${scope.row.createTime}，等待已超过 24 小时，请优先处理`
+                  : `登记于 ${scope.row.createTime}`"
+                placement="top"
               >
-                {{ waitingDurationText(scope.row) }}
+                <el-tag type="danger" effect="plain" size="small">
+                  <el-icon style="vertical-align: -2px;"><Timer /></el-icon>
+                  {{ scope.row.waitingDuration }}
+                </el-tag>
+              </el-tooltip>
+              <el-tooltip
+                v-else
+                :content="`办理于 ${formatTime(scope.row.handleTime)}，等待时长已定格`"
+                placement="top"
+              >
+                <el-tag
+                  :type="scope.row.status === 'CONFIRMED' ? 'success' : 'info'"
+                  effect="plain"
+                  size="small"
+                >
+                  {{ waitingDurationText(scope.row) }}
+                </el-tag>
+              </el-tooltip>
+              <el-tag
+                v-if="scope.row.longWaiting"
+                type="danger"
+                effect="dark"
+                size="small"
+                class="backlog-tag"
+              >
+                <el-icon style="vertical-align: -2px;"><WarningFilled /></el-icon>
+                积压过久
               </el-tag>
-            </el-tooltip>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="createTime" label="登记时间" width="165" />
@@ -292,6 +318,16 @@
               size="small"
             >
               {{ waitingDurationText(currentTransfer) }}
+            </el-tag>
+            <el-tag
+              v-if="currentTransfer.longWaiting"
+              type="danger"
+              effect="dark"
+              size="small"
+              class="backlog-tag"
+            >
+              <el-icon style="vertical-align: -2px;"><WarningFilled /></el-icon>
+              积压过久
             </el-tag>
             <span v-if="currentTransfer.status !== 'PENDING'" class="muted-text duration-note">
               （停在办理时刻{{ formatTime(currentTransfer.handleTime) }}）
@@ -504,7 +540,8 @@ import {
   getTransferById,
   getTransferFlowRecords,
   getTransfersByBlockId,
-  markReceiptPrinted
+  markReceiptPrinted,
+  exportTransfers
 } from '@/api/transfer'
 import { getLeafLines } from '@/api/line'
 import { waitingDurationText } from '@/utils/duration'
@@ -512,11 +549,14 @@ import { waitingDurationText } from '@/utils/duration'
 const loading = ref(false)
 const submitting = ref(false)
 const printing = ref(false)
+const exporting = ref(false)
 const tableData = ref([])
 const total = ref(0)
 const leafLines = ref([])
 const dateRange = ref([])
 
+// 等待时长排序：默认最长优先，压得越久的待确认单越靠前；状态保留在组件内，
+// 打开/关闭详情抽屉不会重置，排队顺序与积压标记保持不变
 const query = reactive({
   page: 1,
   size: 10,
@@ -524,7 +564,8 @@ const query = reactive({
   lineId: null,
   startDate: null,
   endDate: null,
-  blockCode: ''
+  blockCode: '',
+  waitSort: 'LONGEST_FIRST'
 })
 
 const handleVisible = ref(false)
@@ -601,16 +642,36 @@ const handleReset = () => {
     lineId: null,
     startDate: null,
     endDate: null,
-    blockCode: ''
+    blockCode: '',
+    waitSort: 'LONGEST_FIRST'
   })
   loadData()
+}
+
+// 压得太久（等待超过 24 小时）的待确认单行整行标红，标记由后端按统一阈值口径给出
+const rowClassName = ({ row }) => (row.longWaiting ? 'row-long-waiting' : '')
+
+const buildQueryPayload = () => {
+  syncDateRange()
+  return { ...query, blockCode: query.blockCode?.trim() || null }
+}
+
+const doExport = async () => {
+  exporting.value = true
+  try {
+    await exportTransfers(buildQueryPayload())
+    ElMessage.success('当前筛选结果已导出')
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
 }
 
 const loadData = async () => {
   loading.value = true
   try {
-    syncDateRange()
-    const res = await queryTransfers({ ...query, blockCode: query.blockCode?.trim() || null })
+    const res = await queryTransfers(buildQueryPayload())
     tableData.value = res.content
     total.value = res.totalElements
   } catch (e) {
@@ -812,6 +873,22 @@ onMounted(async () => {
 .header-actions {
   display: flex;
   gap: 8px;
+}
+.wait-sort-group {
+  margin-left: auto;
+}
+.wait-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.backlog-tag {
+  font-weight: 600;
+}
+/* 压得太久的待确认单行整行标红，与“积压过久”标记呼应 */
+:deep(.row-long-waiting) {
+  background-color: #fef0f0 !important;
 }
 .tip-bar {
   margin: 12px 0 16px;
