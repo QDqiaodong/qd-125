@@ -16,6 +16,22 @@
       </template>
     </el-alert>
 
+    <!-- 超期未还提醒横幅（已取走、过了计划还期仍未归还） -->
+    <el-alert
+      v-if="overview.overdueReturnCount > 0"
+      class="overdue-banner"
+      type="error"
+      show-icon
+      :closable="false"
+    >
+      <template #title>
+        <div class="overdue-title">
+          <el-icon><Warning /></el-icon>
+          有 {{ overview.overdueReturnCount }} 张已取走的挡块超过计划归还时间仍未归还，请立即催还
+        </div>
+      </template>
+    </el-alert>
+
     <div class="page-card">
       <div class="page-header">
         <div class="page-title">
@@ -43,7 +59,12 @@
         </el-col>
         <el-col :span="6">
           <div class="mini-stat">
-            <div class="mini-label">已取走占用中</div>
+            <div class="mini-label">
+              已取走占用中
+              <el-tag v-if="overview.overdueReturnCount > 0" type="danger" size="small" effect="dark" disable-transitions class="overdue-tag">
+                超期未还 {{ overview.overdueReturnCount }}
+              </el-tag>
+            </div>
             <div class="mini-value danger">{{ overview.pickedUpCount }}</div>
           </div>
         </el-col>
@@ -104,7 +125,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="借用独立于移交划转：只可预约空闲挡块，占用期间挡块档案显示“已约出”；取走、归还按实登记；取消必须填写原因；过了约定取用时间未取走将自动标记“逾时未取”并提醒。"
+        title="借用独立于移交划转：只可预约空闲挡块，占用期间挡块档案显示“已约出”；取走时记下实际取走人与取走时刻；归还时可修改实际归还点；取消必须填写原因；过了约定取用时间未取走将自动标记“逾时未取”，已取走超过计划还期未还将标红“超期未还”。"
       />
 
       <el-table :data="tableData" stripe v-loading="loading" row-key="id" :row-class-name="rowClassName">
@@ -133,10 +154,29 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="计划归还" width="165">
-          <template #default="scope">{{ scope.row.plannedReturnTime ? formatTime(scope.row.plannedReturnTime) : '-' }}</template>
+        <el-table-column label="计划归还" width="175">
+          <template #default="scope">
+            <span v-if="scope.row.plannedReturnTime" :class="{ 'overdue-text': scope.row.overdueReturn }">
+              {{ formatTime(scope.row.plannedReturnTime) }}
+              <el-tag v-if="scope.row.overdueReturn" type="danger" size="small" effect="dark" disable-transitions class="overdue-tag">
+                超期未还 {{ scope.row.overdueReturnDuration }}
+              </el-tag>
+            </span>
+            <span v-else>-</span>
+          </template>
         </el-table-column>
-        <el-table-column prop="returnPoint" label="归还点" min-width="140" show-overflow-tooltip />
+        <el-table-column label="归还点" min-width="140" show-overflow-tooltip>
+          <template #default="scope">
+            <span>{{ scope.row.status === 'RETURNED' && scope.row.actualReturnPoint ? scope.row.actualReturnPoint : scope.row.returnPoint }}</span>
+            <el-tag
+              v-if="scope.row.status === 'RETURNED' && scope.row.actualReturnPoint && scope.row.actualReturnPoint !== scope.row.returnPoint"
+              type="warning"
+              size="small"
+              effect="plain"
+              class="point-changed"
+            >已改点</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="105" align="center">
           <template #default="scope">
             <el-tooltip
@@ -146,6 +186,22 @@
               :content="`已超时 ${scope.row.overdueDuration}，提醒 ${scope.row.remindCount} 次`"
             >
               <el-tag :type="statusMeta(scope.row.status).type" effect="dark" disable-transitions class="overdue-tag">
+                {{ statusMeta(scope.row.status).text }}
+              </el-tag>
+            </el-tooltip>
+            <el-tooltip
+              v-else-if="scope.row.status === 'PICKED_UP'"
+              effect="dark"
+              placement="top"
+            >
+              <template #content>
+                <div>实际取走：{{ formatTime(scope.row.actualPickupTime) }}</div>
+                <div>取走人：{{ scope.row.pickupOperator || '-' }}</div>
+                <div v-if="scope.row.overdueReturn">已超期未还 {{ scope.row.overdueReturnDuration }}</div>
+              </template>
+              <el-tag :type="statusMeta(scope.row.status).type" effect="dark"
+                      :disable-transitions="!!scope.row.overdueReturn"
+                      :class="{ 'overdue-tag': scope.row.overdueReturn }">
                 {{ statusMeta(scope.row.status).text }}
               </el-tag>
             </el-tooltip>
@@ -362,13 +418,34 @@
         <span>{{ actionTarget.blockCode }} · {{ actionTarget.teamName }}</span>
       </div>
       <el-alert
-        type="info"
+        :type="actionTarget && actionTarget.overdueReturn ? 'error' : 'info'"
         :closable="false"
         show-icon
-        :title="`归还点：${actionTarget ? actionTarget.returnPoint : ''}。登记后占用结束，档案恢复空闲。`"
+        :title="returnAlertTitle"
         class="cancel-alert"
       />
       <el-form ref="returnFormRef" :model="returnForm" :rules="actionRules" label-width="90px">
+        <el-form-item label="实际归还点" prop="actualReturnPoint">
+          <el-select
+            v-model="returnForm.actualReturnPoint"
+            placeholder="默认沿用约定归还点，可改"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            style="width: 100%;"
+          >
+            <el-option
+              v-for="line in leafLines"
+              :key="line.id"
+              :label="`${line.lineName}（产线存放点）`"
+              :value="line.lineName"
+            />
+          </el-select>
+          <div v-if="actionTarget" class="return-point-hint">
+            约定归还点：{{ actionTarget.returnPoint }}；不改点可直接留空。
+          </div>
+        </el-form-item>
         <el-form-item label="归还人" prop="operator">
           <el-input v-model="returnForm.operator" placeholder="归还登记人" />
         </el-form-item>
@@ -401,9 +478,26 @@
         </el-descriptions-item>
         <el-descriptions-item label="约定取用">{{ formatTime(currentDetail.pickupTime) }}</el-descriptions-item>
         <el-descriptions-item label="计划归还">
-          {{ currentDetail.plannedReturnTime ? formatTime(currentDetail.plannedReturnTime) : '-' }}
+          <span :class="{ 'overdue-text': currentDetail.overdueReturn }">
+            {{ currentDetail.plannedReturnTime ? formatTime(currentDetail.plannedReturnTime) : '-' }}
+          </span>
+          <el-tag v-if="currentDetail.overdueReturn" type="danger" size="small" effect="dark" class="point-changed">
+            超期未还 {{ currentDetail.overdueReturnDuration }}
+          </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="归还点" :span="2">{{ currentDetail.returnPoint }}</el-descriptions-item>
+        <el-descriptions-item label="约定归还点">{{ currentDetail.returnPoint }}</el-descriptions-item>
+        <el-descriptions-item label="实际归还点">
+          <span v-if="currentDetail.status === 'RETURNED'">
+            {{ currentDetail.actualReturnPoint || currentDetail.returnPoint }}
+            <el-tag
+              v-if="currentDetail.actualReturnPoint && currentDetail.actualReturnPoint !== currentDetail.returnPoint"
+              type="warning"
+              size="small"
+              effect="plain"
+            >归还时改点</el-tag>
+          </span>
+          <span v-else>-</span>
+        </el-descriptions-item>
         <el-descriptions-item label="借用用途" :span="2">{{ currentDetail.purpose || '-' }}</el-descriptions-item>
         <el-descriptions-item v-if="currentDetail.status === 'OVERDUE'" label="逾时提醒" :span="2">
           <el-text type="danger">
@@ -463,7 +557,7 @@ const total = ref(0)
 const allBlocks = ref([])
 const leafLines = ref([])
 
-const overview = ref({ reservedCount: 0, pickedUpCount: 0, overdueCount: 0, activeCount: 0 })
+const overview = ref({ reservedCount: 0, pickedUpCount: 0, overdueCount: 0, overdueReturnCount: 0, activeCount: 0 })
 
 const query = reactive({ status: '', teamName: '', blockCode: '', page: 1, size: 10 })
 
@@ -491,7 +585,8 @@ const flowMeta = (action) => {
   return map[action] || { text: action, type: 'info' }
 }
 
-const rowClassName = ({ row }) => (row.status === 'OVERDUE' ? 'overdue-row' : '')
+const rowClassName = ({ row }) =>
+  row.status === 'OVERDUE' || row.overdueReturn ? 'overdue-row' : ''
 
 // 空闲挡块：在用、未挂起、未被借用占用；待移交挡块同样由后端拦截，这里也先过滤
 const availableBlocks = computed(() => allBlocks.value.filter(b =>
@@ -661,10 +756,18 @@ const actionTarget = ref(null)
 const pickupFormRef = ref(null)
 const returnFormRef = ref(null)
 const pickupForm = reactive({ operator: '', note: '' })
-const returnForm = reactive({ operator: '', note: '' })
+const returnForm = reactive({ operator: '', note: '', actualReturnPoint: '' })
 const actionRules = {
   operator: [{ required: true, message: '请填写操作人', trigger: 'blur' }]
 }
+
+const returnAlertTitle = computed(() => {
+  if (!actionTarget.value) return ''
+  if (actionTarget.value.overdueReturn) {
+    return `该单已超过计划归还时间（超期 ${actionTarget.value.overdueReturnDuration}）仍未归还，登记后占用结束，档案恢复空闲。`
+  }
+  return `约定归还点：${actionTarget.value.returnPoint}，可在下方修改实际归还点；登记后占用结束，档案恢复空闲。`
+})
 
 const handlePickup = (row) => {
   actionTarget.value = row
@@ -695,6 +798,8 @@ const handleReturn = (row) => {
   actionTarget.value = row
   returnForm.operator = ''
   returnForm.note = ''
+  // 默认沿用约定归还点（空值即后端沿用），需要改点时在下拉中另选/输入
+  returnForm.actualReturnPoint = ''
   returnVisible.value = true
 }
 
@@ -704,7 +809,11 @@ const submitReturn = async () => {
     if (!valid) return
     submitting.value = true
     try {
-      await returnBorrowReservation(actionTarget.value.id, { ...returnForm })
+      await returnBorrowReservation(actionTarget.value.id, {
+        operator: returnForm.operator,
+        note: returnForm.note,
+        actualReturnPoint: returnForm.actualReturnPoint || null
+      })
       ElMessage.success('归还登记成功，占用结束')
       returnVisible.value = false
       await loadData()
@@ -745,7 +854,9 @@ onMounted(async () => {
   await loadData()
   pollTimer = setInterval(() => {
     loadOverview()
-    if (!query.status || query.status === 'RESERVED' || query.status === 'OVERDUE') {
+    // 已取走列表也要周期刷新，以便超期未还标记随计划还期到期自动出现
+    if (!query.status || query.status === 'RESERVED' || query.status === 'OVERDUE'
+        || query.status === 'PICKED_UP') {
       loadList()
     }
   }, 60_000)
@@ -788,6 +899,9 @@ onBeforeUnmount(() => {
 .mini-label {
   color: #909399;
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .mini-value {
   font-size: 24px;
@@ -814,6 +928,15 @@ onBeforeUnmount(() => {
 }
 .overdue-tag {
   animation: overdue-blink 1.6s ease-in-out infinite;
+}
+.point-changed {
+  margin-left: 6px;
+}
+.return-point-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
 }
 @keyframes overdue-blink {
   0%, 100% { opacity: 1; }

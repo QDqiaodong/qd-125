@@ -51,6 +51,12 @@ public class BufferBlockDTO {
     private LocalDateTime borrowPickupTime;
     /** 约定归还点 */
     private String borrowReturnPoint;
+    /** 计划归还时间 */
+    private LocalDateTime borrowPlannedReturnTime;
+    /** 已取走但超过计划还期仍未归还（与预约台“超期未还”同一派生口径） */
+    private Boolean borrowOverdueReturn;
+    /** 超期未还时长（派生展示） */
+    private String borrowOverdueReturnDuration;
 
     public BufferBlockDTO() {
     }
@@ -135,4 +141,13 @@ public class BufferBlockDTO {
 
     public String getBorrowReturnPoint() { return borrowReturnPoint; }
     public void setBorrowReturnPoint(String borrowReturnPoint) { this.borrowReturnPoint = borrowReturnPoint; }
+
+    public LocalDateTime getBorrowPlannedReturnTime() { return borrowPlannedReturnTime; }
+    public void setBorrowPlannedReturnTime(LocalDateTime borrowPlannedReturnTime) { this.borrowPlannedReturnTime = borrowPlannedReturnTime; }
+
+    public Boolean getBorrowOverdueReturn() { return borrowOverdueReturn; }
+    public void setBorrowOverdueReturn(Boolean borrowOverdueReturn) { this.borrowOverdueReturn = borrowOverdueReturn; }
+
+    public String getBorrowOverdueReturnDuration() { return borrowOverdueReturnDuration; }
+    public void setBorrowOverdueReturnDuration(String borrowOverdueReturnDuration) { this.borrowOverdueReturnDuration = borrowOverdueReturnDuration; }
 }

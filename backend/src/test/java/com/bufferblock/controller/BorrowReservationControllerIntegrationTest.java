@@ -125,6 +125,50 @@ class BorrowReservationControllerIntegrationTest {
         assertThat(freeBlock.path("borrowedOut").asBoolean()).isFalse();
     }
 
+    @Test
+    void pickupAndReturnWithChangedPointReleasesBlockMark() throws Exception {
+        // 1. 预约
+        String body = "{\"blockId\":" + blockId
+                + ",\"teamName\":\"TEAM-R\""
+                + ",\"pickupTime\":\"" + LocalDateTime.now().minusHours(2).format(FMT) + "\""
+                + ",\"plannedReturnTime\":\"" + LocalDateTime.now().minusHours(1).format(FMT) + "\""
+                + ",\"returnPoint\":\"RACK-01\""
+                + ",\"operator\":\"PLAN-A\"}";
+        MvcResult created = mockMvc.perform(post("/api/borrow-reservations")
+                        .contentType(MediaType.parseMediaType("application/json;charset=UTF-8")).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RESERVED"))
+                .andReturn();
+        Long reservationId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .path("data").path("id").asLong();
+
+        // 2. 取走
+        mockMvc.perform(post("/api/borrow-reservations/" + reservationId + "/pickup")
+                        .contentType(MediaType.parseMediaType("application/json;charset=UTF-8"))
+                        .content("{\"operator\":\"PICKER-A\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PICKED_UP"))
+                .andExpect(jsonPath("$.data.actualPickupTime").isNotEmpty())
+                .andExpect(jsonPath("$.data.pickupOperator").value("PICKER-A"))
+                // 已过计划还期：超期未还标记实时派生
+                .andExpect(jsonPath("$.data.overdueReturn").value(true));
+
+        // 3. 归还时改归还点
+        mockMvc.perform(post("/api/borrow-reservations/" + reservationId + "/return")
+                        .contentType(MediaType.parseMediaType("application/json;charset=UTF-8"))
+                        .content("{\"operator\":\"KEEPER-A\",\"actualReturnPoint\":\"RACK-09\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("RETURNED"))
+                .andExpect(jsonPath("$.data.actualReturnPoint").value("RACK-09"))
+                .andExpect(jsonPath("$.data.returnPoint").value("RACK-01"))
+                .andExpect(jsonPath("$.data.overdueReturn").value(false));
+
+        // 4. 档案恢复空闲
+        JsonNode freeBlock = findBlock(
+                mockMvc.perform(get("/api/blocks")).andReturn(), blockId);
+        assertThat(freeBlock.path("borrowedOut").asBoolean()).isFalse();
+    }
+
     private JsonNode findBlock(MvcResult result, Long id) throws Exception {
         JsonNode array = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
         for (JsonNode node : array) {

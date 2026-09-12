@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS block_borrow_reservation (
     actual_pickup_time DATETIME DEFAULT NULL COMMENT '实际取走时间',
     return_operator VARCHAR(50) DEFAULT NULL COMMENT '归还登记人',
     actual_return_time DATETIME DEFAULT NULL COMMENT '实际归还时间',
+    actual_return_point VARCHAR(200) DEFAULT NULL COMMENT '实际归还点（归还时可改，留空沿用约定归还点）',
     cancel_reason VARCHAR(500) DEFAULT NULL COMMENT '取消原因(必填)',
     cancel_operator VARCHAR(50) DEFAULT NULL COMMENT '取消操作人',
     cancel_time DATETIME DEFAULT NULL COMMENT '取消时间',

@@ -52,4 +52,12 @@ public interface BlockBorrowReservationRepository extends JpaRepository<BlockBor
             @Param("prefix") String prefix, Pageable pageable);
 
     long countByStatus(String status);
+
+    /**
+     * 超期未还计数：已取走占用中、登记了计划归还时间且已过期。
+     * 口径实时派生，不新增状态，归还后自然出表。
+     */
+    @Query("SELECT COUNT(r) FROM BlockBorrowReservation r WHERE r.status = 'PICKED_UP' " +
+           "AND r.plannedReturnTime IS NOT NULL AND r.plannedReturnTime <= :now")
+    long countOverdueReturn(@Param("now") LocalDateTime now);
 }

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS block_borrow_reservation (
     actual_pickup_time DATETIME DEFAULT NULL COMMENT '实际取走时间',
     return_operator VARCHAR(50) DEFAULT NULL COMMENT '归还登记人',
     actual_return_time DATETIME DEFAULT NULL COMMENT '实际归还时间',
+    actual_return_point VARCHAR(200) DEFAULT NULL COMMENT '实际归还点（归还时可改，留空沿用约定归还点）',
     cancel_reason VARCHAR(500) DEFAULT NULL COMMENT '取消原因(必填)',
     cancel_operator VARCHAR(50) DEFAULT NULL COMMENT '取消操作人',
     cancel_time DATETIME DEFAULT NULL COMMENT '取消时间',
@@ -60,3 +61,17 @@ CREATE TABLE IF NOT EXISTS block_borrow_flow_record (
     INDEX idx_borrow_flow_reservation (reservation_id),
     INDEX idx_borrow_flow_action (action)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='借用预约流转记录';
+
+-- 存量表补齐实际归还点列（MySQL 8 不支持 ADD COLUMN IF NOT EXISTS，用元数据判断保证幂等）
+SET @ddl := (
+    SELECT IF(COUNT(*) = 0,
+        'ALTER TABLE block_borrow_reservation ADD COLUMN actual_return_point VARCHAR(200) DEFAULT NULL COMMENT ''实际归还点（归还时可改，留空沿用约定归还点）''',
+        'SELECT 1')
+    FROM information_schema.COLUMNS
+    WHERE LOWER(TABLE_SCHEMA) = LOWER(DATABASE())
+      AND LOWER(TABLE_NAME) = 'block_borrow_reservation'
+      AND LOWER(COLUMN_NAME) = 'actual_return_point'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

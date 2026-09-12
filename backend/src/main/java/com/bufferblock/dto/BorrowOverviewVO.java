@@ -11,6 +11,8 @@ public class BorrowOverviewVO {
     private long pickedUpCount;
     /** 过了约定取用时间仍未取走（已提醒）的单数 */
     private long overdueCount;
+    /** 已取走但超过计划还期仍未归还的单数 */
+    private long overdueReturnCount;
     /** 占用中合计（已预约 + 已取走 + 逾时未取），即档案上“已约出”的挡块数 */
     private long activeCount;
 
@@ -25,6 +27,9 @@ public class BorrowOverviewVO {
 
     public long getOverdueCount() { return overdueCount; }
     public void setOverdueCount(long overdueCount) { this.overdueCount = overdueCount; }
+
+    public long getOverdueReturnCount() { return overdueReturnCount; }
+    public void setOverdueReturnCount(long overdueReturnCount) { this.overdueReturnCount = overdueReturnCount; }
 
     public long getActiveCount() { return activeCount; }
     public void setActiveCount(long activeCount) { this.activeCount = activeCount; }

@@ -81,12 +81,12 @@
 
     <el-row :gutter="20" style="margin-top: 20px;">
       <el-col :span="24">
-        <div class="page-card borrow-banner" :class="{ 'borrow-overdue': borrow.overdueCount > 0 }" @click="goBorrow">
+        <div class="page-card borrow-banner" :class="{ 'borrow-overdue': borrow.overdueCount > 0 || borrow.overdueReturnCount > 0 }" @click="goBorrow">
           <div class="pending-left">
-            <el-icon :size="26" :color="borrow.overdueCount > 0 ? '#f56c6c' : '#722ed1'"><Calendar /></el-icon>
+            <el-icon :size="26" :color="borrow.overdueCount > 0 || borrow.overdueReturnCount > 0 ? '#f56c6c' : '#722ed1'"><Calendar /></el-icon>
             <div>
               <div class="pending-title">挡块借用预约</div>
-              <div class="pending-desc">班组可预约空闲挡块、约定取用时段与归还点，占用期间档案标记“已约出”；过点未取自动提醒</div>
+              <div class="pending-desc">班组可预约空闲挡块、约定取用时段与归还点，占用期间档案标记“已约出”；过点未取自动提醒，超期未还整行标红</div>
             </div>
           </div>
           <div class="pending-right">
@@ -95,8 +95,10 @@
             <span class="borrow-reserved">{{ borrow.reservedCount }}</span>
             <span class="pending-unit">单待取 ·</span>
             <span :class="borrow.overdueCount > 0 ? 'stocktake-pending' : 'borrow-count'">{{ borrow.overdueCount }}</span>
-            <span class="pending-unit">单逾时未取</span>
-            <el-button :type="borrow.overdueCount > 0 ? 'danger' : 'primary'" plain size="small">前往预约</el-button>
+            <span class="pending-unit">单逾时未取 ·</span>
+            <span :class="borrow.overdueReturnCount > 0 ? 'stocktake-pending' : 'borrow-count'">{{ borrow.overdueReturnCount }}</span>
+            <span class="pending-unit">单超期未还</span>
+            <el-button :type="borrow.overdueCount > 0 || borrow.overdueReturnCount > 0 ? 'danger' : 'primary'" plain size="small">前往预约</el-button>
           </div>
         </div>
       </el-col>
@@ -216,6 +218,7 @@ const borrow = ref({
   reservedCount: 0,
   pickedUpCount: 0,
   overdueCount: 0,
+  overdueReturnCount: 0,
   activeCount: 0
 })
 
@@ -259,6 +262,7 @@ onMounted(async () => {
     borrow.value.reservedCount = borrowOverview.reservedCount
     borrow.value.pickedUpCount = borrowOverview.pickedUpCount
     borrow.value.overdueCount = borrowOverview.overdueCount
+    borrow.value.overdueReturnCount = borrowOverview.overdueReturnCount || 0
     borrow.value.activeCount = borrowOverview.activeCount
     stats.value.totalLines = lines.length
     stats.value.totalBlocks = blocks.length

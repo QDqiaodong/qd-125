@@ -75,6 +75,10 @@ public class BlockBorrowReservation {
     @Column(name = "actual_return_time")
     private LocalDateTime actualReturnTime;
 
+    /** 实际归还点：归还时可在登记弹窗修改，留空则与约定归还点一致 */
+    @Column(name = "actual_return_point", length = 200)
+    private String actualReturnPoint;
+
     @Column(name = "cancel_reason", length = 500)
     private String cancelReason;
 
@@ -121,6 +125,14 @@ public class BlockBorrowReservation {
     /** 逾时未取的超时时长（口径见 BorrowReservationService.OVERDUE_GRACE_MINUTES） */
     @Transient
     private String overdueDuration;
+
+    /** 超过计划还期仍未归还（已取走占用中且计划归还时间已过），列表整行标红 */
+    @Transient
+    private Boolean overdueReturn;
+
+    /** 超期未还时长（已取走且过计划还期时派生） */
+    @Transient
+    private String overdueReturnDuration;
 
     public BlockBorrowReservation() {
     }
@@ -173,6 +185,9 @@ public class BlockBorrowReservation {
     public LocalDateTime getActualReturnTime() { return actualReturnTime; }
     public void setActualReturnTime(LocalDateTime actualReturnTime) { this.actualReturnTime = actualReturnTime; }
 
+    public String getActualReturnPoint() { return actualReturnPoint; }
+    public void setActualReturnPoint(String actualReturnPoint) { this.actualReturnPoint = actualReturnPoint; }
+
     public String getCancelReason() { return cancelReason; }
     public void setCancelReason(String cancelReason) { this.cancelReason = cancelReason; }
 
@@ -214,4 +229,10 @@ public class BlockBorrowReservation {
 
     public String getOverdueDuration() { return overdueDuration; }
     public void setOverdueDuration(String overdueDuration) { this.overdueDuration = overdueDuration; }
+
+    public Boolean getOverdueReturn() { return overdueReturn; }
+    public void setOverdueReturn(Boolean overdueReturn) { this.overdueReturn = overdueReturn; }
+
+    public String getOverdueReturnDuration() { return overdueReturnDuration; }
+    public void setOverdueReturnDuration(String overdueReturnDuration) { this.overdueReturnDuration = overdueReturnDuration; }
 }

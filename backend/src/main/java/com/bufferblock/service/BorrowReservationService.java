@@ -30,7 +30,9 @@ import java.util.Set;
  * <ul>
  *     <li>班组只能预约空闲挡块（在用、未挂起、无占用中预约/待确认移交）；</li>
  *     <li>预约登记即占用，档案列表通过 {@link #activeReservationMap()} 显示“已约出”；</li>
- *     <li>取走登记后状态为“已取走”，归还到约定归还点后占用结束；</li>
+ *     <li>取走登记后状态为“已取走”，实际取走人与实际取走时刻随单落库；归还时可修改实际归还点，
+ *     默认沿用约定归还点，改动写入流转记录；</li>
+ *     <li>已取走但超过计划还期仍未归还的，列表实时派生“超期未还”标记与超期时长，整行标红；</li>
  *     <li>取消必须填写原因，原因随状态一并落库；</li>
  *     <li>到约定取用时间未取走（含宽限期）由定时任务置为“逾时未取”并提醒，提醒落库；</li>
  *     <li>全部状态均落库持久化，刷新/重开页面后档案标记与预约状态保持一致。</li>
@@ -121,6 +123,7 @@ public class BorrowReservationService {
         vo.setReservedCount(reserved);
         vo.setPickedUpCount(pickedUp);
         vo.setOverdueCount(overdue);
+        vo.setOverdueReturnCount(reservationRepository.countOverdueReturn(LocalDateTime.now()));
         vo.setActiveCount(reserved + pickedUp + overdue);
         return vo;
     }
@@ -132,6 +135,8 @@ public class BorrowReservationService {
     public java.util.Map<Long, BlockBorrowReservation> activeReservationMap() {
         java.util.Map<Long, BlockBorrowReservation> map = new java.util.HashMap<>();
         for (BlockBorrowReservation r : reservationRepository.findByStatusIn(ACTIVE_STATUSES)) {
+            // 派生“超期未还”，保证档案标记与预约台列表同一口径
+            deriveOverdueReturn(r);
             map.putIfAbsent(r.getBlockId(), r);
         }
         return map;
@@ -249,15 +254,31 @@ public class BorrowReservationService {
             throw new RuntimeException("仅已取走的预约单可登记归还，当前状态：" + statusText(reservation.getStatus()));
         }
         String operator = requireOperator(dto == null ? null : dto.getOperator(), "归还登记人");
+        // 归还时允许改归还点：留空沿用预约约定，填写了以实际归还点为准并在流转中留痕
+        String plannedPoint = reservation.getReturnPoint();
+        String actualPoint = trimToNull(dto == null ? null : dto.getActualReturnPoint());
+        if (actualPoint != null && actualPoint.length() > 200) {
+            throw new RuntimeException("实际归还点长度不能超过200字");
+        }
+        String effectivePoint = actualPoint != null ? actualPoint : plannedPoint;
 
         reservation.setStatus(BlockBorrowReservation.STATUS_RETURNED);
         reservation.setReturnOperator(operator);
         reservation.setActualReturnTime(LocalDateTime.now());
+        reservation.setActualReturnPoint(effectivePoint);
         reservation = reservationRepository.save(reservation);
 
+        StringBuilder note = new StringBuilder("实物已归还至");
+        if (actualPoint != null && !actualPoint.equals(plannedPoint)) {
+            note.append("实际归还点：").append(actualPoint)
+                    .append("（原约定归还点：").append(plannedPoint).append("）");
+        } else {
+            note.append("约定归还点：").append(effectivePoint);
+        }
+        note.append(appendNote(dto));
         recordFlow(reservation.getId(), BlockBorrowFlowRecord.ACTION_RETURN,
                 BlockBorrowReservation.STATUS_PICKED_UP, BlockBorrowReservation.STATUS_RETURNED,
-                operator, "实物已归还至约定归还点：" + reservation.getReturnPoint() + appendNote(dto));
+                operator, note.toString());
 
         enrich(reservation);
         return reservation;
@@ -377,6 +398,22 @@ public class BorrowReservationService {
         if (BlockBorrowReservation.STATUS_OVERDUE.equals(r.getStatus()) && r.getPickupTime() != null) {
             r.setOverdueDuration(formatDuration(Duration.between(r.getPickupTime(), LocalDateTime.now())));
         }
+        // 超期未还派生不依赖挡块主数据，档案页经 activeReservationMap 取占用单时也会调用
+        deriveOverdueReturn(r);
+    }
+
+    /**
+     * 超期未还：已取走占用中、登记了计划还期且已过期。纯读时派生，不新增持久化状态，
+     * 因此再进预约台/档案页始终与实际占用和流转记录对得上。
+     */
+    private void deriveOverdueReturn(BlockBorrowReservation r) {
+        boolean overdueReturn = BlockBorrowReservation.STATUS_PICKED_UP.equals(r.getStatus())
+                && r.getPlannedReturnTime() != null
+                && r.getPlannedReturnTime().isBefore(LocalDateTime.now());
+        r.setOverdueReturn(overdueReturn);
+        r.setOverdueReturnDuration(overdueReturn
+                ? formatDuration(Duration.between(r.getPlannedReturnTime(), LocalDateTime.now()))
+                : null);
     }
 
     private String trimToNull(String value) {

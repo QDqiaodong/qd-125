@@ -54,7 +54,7 @@ public class BorrowReservationController {
         return Result.success(borrowReservationService.pickup(id, dto));
     }
 
-    /** 归还到约定归还点，占用结束 */
+    /** 归还登记，可在入参中改实际归还点（留空沿用约定归还点），登记后占用结束 */
     @PostMapping("/{id}/return")
     public Result<BlockBorrowReservation> giveBack(@PathVariable Long id, @RequestBody(required = false) BorrowHandleDTO dto) {
         return Result.success(borrowReservationService.giveBack(id, dto));

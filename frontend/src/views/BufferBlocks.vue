@@ -75,10 +75,17 @@
               <template #content>
                 <div>{{ scope.row.borrowReservationNo }} · {{ scope.row.borrowTeamName }}</div>
                 <div>约定取用：{{ formatTime(scope.row.borrowPickupTime) }}</div>
+                <div>计划归还：{{ formatTime(scope.row.borrowPlannedReturnTime) }}</div>
                 <div>归还点：{{ scope.row.borrowReturnPoint }}</div>
+                <div v-if="scope.row.borrowOverdueReturn" style="color:#fbc4c4;font-weight:600;">
+                  超期未还 {{ scope.row.borrowOverdueReturnDuration }}
+                </div>
               </template>
-              <el-tag :type="borrowMeta(scope.row.borrowStatus).type" effect="dark">
-                {{ borrowMeta(scope.row.borrowStatus).text }}
+              <el-tag :type="borrowMeta(scope.row.borrowStatus, !!scope.row.borrowOverdueReturn).type"
+                      effect="dark"
+                      :disable-transitions="!!scope.row.borrowOverdueReturn"
+                      :class="{ 'borrow-overdue-tag': scope.row.borrowOverdueReturn }">
+                {{ borrowMeta(scope.row.borrowStatus, !!scope.row.borrowOverdueReturn).text }}
               </el-tag>
             </el-tooltip>
             <el-tag v-else type="success" effect="plain">空闲可约</el-tag>
@@ -159,14 +166,22 @@
         <el-descriptions-item label="厚度规格">{{ currentDetail.thickness }} mm</el-descriptions-item>
         <el-descriptions-item label="当前产线">{{ currentDetail.lineName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="借用状态">
-          <el-tag v-if="currentDetail.borrowedOut" :type="borrowMeta(currentDetail.borrowStatus).type" effect="dark">
-            {{ borrowMeta(currentDetail.borrowStatus).text }}
+          <el-tag v-if="currentDetail.borrowedOut"
+                  :type="borrowMeta(currentDetail.borrowStatus, !!currentDetail.borrowOverdueReturn).type"
+                  effect="dark"
+                  :disable-transitions="!!currentDetail.borrowOverdueReturn"
+                  :class="{ 'borrow-overdue-tag': currentDetail.borrowOverdueReturn }">
+            {{ borrowMeta(currentDetail.borrowStatus, !!currentDetail.borrowOverdueReturn).text }}
           </el-tag>
           <el-tag v-else type="success" effect="plain">空闲可约</el-tag>
         </el-descriptions-item>
         <el-descriptions-item v-if="currentDetail.borrowedOut" label="借用预约" :span="2">
           {{ currentDetail.borrowReservationNo }} · {{ currentDetail.borrowTeamName }}，
-          约定取用 {{ formatTime(currentDetail.borrowPickupTime) }}，归还点：{{ currentDetail.borrowReturnPoint }}
+          约定取用 {{ formatTime(currentDetail.borrowPickupTime) }}，
+          计划归还 {{ formatTime(currentDetail.borrowPlannedReturnTime) }}，归还点：{{ currentDetail.borrowReturnPoint }}
+          <el-tag v-if="currentDetail.borrowOverdueReturn" type="danger" size="small" effect="dark" style="margin-left:6px;">
+            超期未还 {{ currentDetail.borrowOverdueReturnDuration }}
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="建档时间">{{ currentDetail.createTime }}</el-descriptions-item>
         <el-descriptions-item label="实物图片" :span="2">
@@ -211,17 +226,55 @@
       </el-table>
 
       <el-divider content-position="left">借用记录</el-divider>
-      <el-table :data="borrowHistory" stripe size="small">
-        <el-table-column prop="reservationNo" label="预约单号" width="180" />
-        <el-table-column prop="teamName" label="借用班组" width="140" />
-        <el-table-column label="约定取用" width="170">
-          <template #default="scope">{{ formatTime(scope.row.pickupTime) }}</template>
+      <el-table :data="borrowHistory" stripe size="small" :row-class-name="borrowRowClassName">
+        <el-table-column prop="reservationNo" label="预约单号" width="170" />
+        <el-table-column prop="teamName" label="借用班组" width="110" />
+        <el-table-column label="实际取走" width="170">
+          <template #default="scope">
+            <span v-if="scope.row.actualPickupTime">
+              {{ formatTime(scope.row.actualPickupTime) }}
+              <span class="muted">{{ scope.row.pickupOperator }}</span>
+            </span>
+            <span v-else>-</span>
+          </template>
         </el-table-column>
-        <el-table-column prop="returnPoint" label="归还点" show-overflow-tooltip />
+        <el-table-column label="计划归还" width="170">
+          <template #default="scope">
+            <span :class="{ 'overdue-text': scope.row.overdueReturn }">
+              {{ formatTime(scope.row.plannedReturnTime) }}
+            </span>
+            <el-tag v-if="scope.row.overdueReturn" type="danger" size="small" effect="dark">
+              超期 {{ scope.row.overdueReturnDuration }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="实际归还" width="170">
+          <template #default="scope">
+            <span v-if="scope.row.actualReturnTime">
+              {{ formatTime(scope.row.actualReturnTime) }}
+              <span class="muted">{{ scope.row.returnOperator }}</span>
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="归还点" min-width="150" show-overflow-tooltip>
+          <template #default="scope">
+            <span v-if="scope.row.status === 'RETURNED'">
+              {{ scope.row.actualReturnPoint || scope.row.returnPoint }}
+              <el-tag
+                v-if="scope.row.actualReturnPoint && scope.row.actualReturnPoint !== scope.row.returnPoint"
+                type="warning"
+                size="small"
+                effect="plain"
+              >改点</el-tag>
+            </span>
+            <span v-else>{{ scope.row.returnPoint }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="borrowMeta(scope.row.status).type" size="small">
-              {{ borrowMeta(scope.row.status).text }}
+            <el-tag :type="borrowMeta(scope.row.status, !!scope.row.overdueReturn).type" size="small">
+              {{ borrowMeta(scope.row.status, !!scope.row.overdueReturn).text }}
             </el-tag>
           </template>
         </el-table-column>
@@ -281,7 +334,10 @@ const borrowHistory = ref([])
 
 const formatTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-')
 
-const borrowMeta = (status) => {
+const borrowMeta = (status, overdueReturn = false) => {
+  if (overdueReturn) {
+    return { text: '超期未还', type: 'danger' }
+  }
   const map = {
     RESERVED: { text: '已约出', type: 'warning' },
     PICKED_UP: { text: '已取走', type: 'danger' },
@@ -289,6 +345,8 @@ const borrowMeta = (status) => {
   }
   return map[status] || { text: '占用中', type: 'warning' }
 }
+
+const borrowRowClassName = ({ row }) => (row.overdueReturn ? 'borrow-overdue-row' : '')
 
 const filteredBlocks = computed(() => {
   let result = allBlocks.value
@@ -415,5 +473,27 @@ onMounted(() => {
   padding: 12px;
   background: #fafafa;
   border-radius: 4px;
+}
+.muted {
+  color: #909399;
+  font-size: 12px;
+  margin-left: 4px;
+}
+.overdue-text {
+  color: #f56c6c;
+  font-weight: 600;
+}
+.borrow-overdue-tag {
+  animation: borrow-overdue-blink 1.6s ease-in-out infinite;
+}
+@keyframes borrow-overdue-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+</style>
+
+<style>
+.borrow-overdue-row {
+  background-color: #fef0f0 !important;
 }
 </style>

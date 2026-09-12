@@ -36,6 +36,10 @@ public class BorrowReservationSchemaMigration {
     public void migrate() {
         log.info("[V5迁移] 开始检查挡块借用预约所需的数据库结构...");
         createReservationTableIfMissing();
+        // 存量库（V5 初版无实际归还点列）补齐：归还时允许改归还点
+        addColumnIfMissing("block_borrow_reservation", "actual_return_point",
+                "ALTER TABLE block_borrow_reservation ADD COLUMN actual_return_point VARCHAR(200) DEFAULT NULL " +
+                        "COMMENT '实际归还点（归还时可改，留空沿用约定归还点）'");
         createSequenceTableIfMissing();
         createFlowRecordTableIfMissing();
         ensureInitializationLock();
@@ -66,6 +70,7 @@ public class BorrowReservationSchemaMigration {
                     "    actual_pickup_time DATETIME DEFAULT NULL COMMENT '实际取走时间'," +
                     "    return_operator VARCHAR(50) DEFAULT NULL COMMENT '归还登记人'," +
                     "    actual_return_time DATETIME DEFAULT NULL COMMENT '实际归还时间'," +
+                    "    actual_return_point VARCHAR(200) DEFAULT NULL COMMENT '实际归还点（归还时可改，留空沿用约定归还点）'," +
                     "    cancel_reason VARCHAR(500) DEFAULT NULL COMMENT '取消原因(必填)'," +
                     "    cancel_operator VARCHAR(50) DEFAULT NULL COMMENT '取消操作人'," +
                     "    cancel_time DATETIME DEFAULT NULL COMMENT '取消时间'," +
@@ -84,6 +89,36 @@ public class BorrowReservationSchemaMigration {
                 throw e;
             }
             log.info("[V5迁移] 借用预约主表已存在，跳过");
+        }
+    }
+
+    /** 存量库幂等补列：列已存在则跳过；元数据不可读时兜底捕获 1060/重复列异常。 */
+    private void addColumnIfMissing(String table, String column, String ddl) {
+        if (columnExists(table, column)) {
+            return;
+        }
+        try {
+            log.info("[V5迁移] 补充缺失列：{}.{}", table, column);
+            jdbcTemplate.execute(ddl);
+        } catch (Exception e) {
+            if (isAlreadyExists(e)) {
+                log.info("[V5迁移] 列 {}.{} 已存在，跳过", table, column);
+            } else {
+                throw e;
+            }
+        }
+    }
+
+    private boolean columnExists(String table, String column) {
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS " +
+                            "WHERE LOWER(TABLE_NAME) = LOWER(?) AND LOWER(COLUMN_NAME) = LOWER(?)",
+                    Integer.class, table, column);
+            return count != null && count > 0;
+        } catch (Exception e) {
+            log.debug("[V5迁移] 列元数据查询失败，将直接尝试加列：{}", e.getMessage());
+            return false;
         }
     }
 
@@ -170,7 +205,11 @@ public class BorrowReservationSchemaMigration {
             }
             if (cur instanceof java.sql.SQLException sqlEx) {
                 String state = sqlEx.getSQLState();
-                if ("42S01".equals(state) || "42101".equals(state)) {
+                if ("42S01".equals(state) || "42101".equals(state) || "42S21".equals(state)) {
+                    return true;
+                }
+                // 1060: MySQL Duplicate column name
+                if (sqlEx.getErrorCode() == 1060) {
                     return true;
                 }
             }

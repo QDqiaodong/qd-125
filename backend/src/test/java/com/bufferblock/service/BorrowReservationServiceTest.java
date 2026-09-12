@@ -210,6 +210,90 @@ class BorrowReservationServiceTest {
     }
 
     @Test
+    void giveBackCanChangeReturnPointAndFlowKeepsBothPoints() {
+        Long blockId = saveBlock("BLK-BR-011");
+        BlockBorrowReservation reservation = borrowReservationService.create(
+                createDto(blockId, LocalDateTime.now().minusHours(2)));
+        BorrowHandleDTO pickup = new BorrowHandleDTO();
+        pickup.setOperator("班组取走人");
+        borrowReservationService.pickup(reservation.getId(), pickup);
+
+        BorrowHandleDTO ret = new BorrowHandleDTO();
+        ret.setOperator("库管员");
+        ret.setActualReturnPoint("二号周转库");
+        BlockBorrowReservation returned = borrowReservationService.giveBack(reservation.getId(), ret);
+
+        // 实际归还点按登记落库，约定归还点保留可审计
+        assertThat(returned.getActualReturnPoint()).isEqualTo("二号周转库");
+        assertThat(returned.getReturnPoint()).isEqualTo("借用测试01号线");
+
+        List<BlockBorrowFlowRecord> flows = flowRecordRepository
+                .findByReservationIdOrderByCreateTimeAscIdAsc(reservation.getId());
+        BlockBorrowFlowRecord returnFlow = flows.stream()
+                .filter(f -> BlockBorrowFlowRecord.ACTION_RETURN.equals(f.getAction()))
+                .findFirst().orElseThrow();
+        assertThat(returnFlow.getNote()).contains("二号周转库");
+        assertThat(returnFlow.getNote()).contains("借用测试01号线");
+
+        // 未传实际归还点时沿用约定归还点
+        Long blockId2 = saveBlock("BLK-BR-012");
+        BlockBorrowReservation r2 = borrowReservationService.create(
+                createDto(blockId2, LocalDateTime.now().minusHours(1)));
+        borrowReservationService.pickup(r2.getId(), pickup);
+        BorrowHandleDTO ret2 = new BorrowHandleDTO();
+        ret2.setOperator("库管员");
+        BlockBorrowReservation returned2 = borrowReservationService.giveBack(r2.getId(), ret2);
+        assertThat(returned2.getActualReturnPoint()).isEqualTo("借用测试01号线");
+    }
+
+    @Test
+    void pickedUpPastPlannedReturnFlaggedOverdueReturnOnListAndArchive() {
+        Long blockId = saveBlock("BLK-BR-013");
+        // 约定取用已过、计划还期也已过
+        BorrowReservationCreateDTO dto = createDto(blockId, LocalDateTime.now().minusDays(2));
+        dto.setPlannedReturnTime(LocalDateTime.now().minusHours(3));
+        BlockBorrowReservation reservation = borrowReservationService.create(dto);
+
+        BorrowHandleDTO pickup = new BorrowHandleDTO();
+        pickup.setOperator("班组取走人");
+        borrowReservationService.pickup(reservation.getId(), pickup);
+
+        // 列表/详情派生“超期未还”标记与超期时长
+        BlockBorrowReservation view = borrowReservationService.getById(reservation.getId());
+        assertThat(view.getOverdueReturn()).isTrue();
+        assertThat(view.getOverdueReturnDuration()).isNotBlank();
+        assertThat(borrowReservationService.overview().getOverdueReturnCount()).isEqualTo(1);
+
+        // 档案页同一口径：占用中且带超期未还标记
+        assertThat(bufferBlockService.getById(blockId).getBorrowedOut()).isTrue();
+        assertThat(bufferBlockService.getById(blockId).getBorrowOverdueReturn()).isTrue();
+        assertThat(bufferBlockService.getById(blockId).getBorrowOverdueReturnDuration()).isNotBlank();
+
+        // 归还后标记消失（状态不再是占用中）
+        BorrowHandleDTO ret = new BorrowHandleDTO();
+        ret.setOperator("库管员");
+        borrowReservationService.giveBack(reservation.getId(), ret);
+        assertThat(borrowReservationService.getById(reservation.getId()).getOverdueReturn()).isFalse();
+        assertThat(borrowReservationService.overview().getOverdueReturnCount()).isZero();
+        assertThat(bufferBlockService.getById(blockId).getBorrowedOut()).isFalse();
+    }
+
+    @Test
+    void pickedUpBeforePlannedReturnNotFlaggedOverdue() {
+        Long blockId = saveBlock("BLK-BR-014");
+        BorrowReservationCreateDTO dto = createDto(blockId, LocalDateTime.now().minusHours(1));
+        dto.setPlannedReturnTime(LocalDateTime.now().plusDays(1));
+        BlockBorrowReservation reservation = borrowReservationService.create(dto);
+        BorrowHandleDTO pickup = new BorrowHandleDTO();
+        pickup.setOperator("班组取走人");
+        borrowReservationService.pickup(reservation.getId(), pickup);
+
+        assertThat(borrowReservationService.getById(reservation.getId()).getOverdueReturn()).isFalse();
+        assertThat(borrowReservationService.overview().getOverdueReturnCount()).isZero();
+        assertThat(bufferBlockService.getById(blockId).getBorrowOverdueReturn()).isFalse();
+    }
+
+    @Test
     void createRejectsMissingRequiredFields() {
         Long blockId = saveBlock("BLK-BR-007");
         BorrowReservationCreateDTO noTeam = createDto(blockId, LocalDateTime.now().plusHours(1));

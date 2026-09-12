@@ -222,7 +222,8 @@ public class BufferBlockService {
 
     /**
      * 占用期间（已预约/已取走/逾时未取）在档案上叠加“已约出”标记与预约单号、
-     * 约定取用时间、借用班组、归还点；取消/归还后该标记自然消失。
+     * 约定取用时间、借用班组、归还点；已取走且过计划还期的同时标“超期未还”，
+     * 与预约台列表同一实时派生口径；取消/归还后该标记自然消失。
      */
     private BufferBlockDTO withBorrowMark(BufferBlockDTO dto, Map<Long, BlockBorrowReservation> borrowMap) {
         BlockBorrowReservation reservation = borrowMap.get(dto.getId());
@@ -233,6 +234,9 @@ public class BufferBlockService {
             dto.setBorrowTeamName(reservation.getTeamName());
             dto.setBorrowPickupTime(reservation.getPickupTime());
             dto.setBorrowReturnPoint(reservation.getReturnPoint());
+            dto.setBorrowPlannedReturnTime(reservation.getPlannedReturnTime());
+            dto.setBorrowOverdueReturn(Boolean.TRUE.equals(reservation.getOverdueReturn()));
+            dto.setBorrowOverdueReturnDuration(reservation.getOverdueReturnDuration());
         }
         return dto;
     }
