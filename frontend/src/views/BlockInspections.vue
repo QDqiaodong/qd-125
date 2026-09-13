@@ -318,17 +318,64 @@
         <el-button type="primary" @click="blockedVisible = false">我知道了，先去复检</el-button>
       </template>
     </el-dialog>
+
+    <!-- 点检工装超期/不合格拦截：逐条列出超期工装编号，与校准台拦截清单同源 -->
+    <el-dialog
+      v-model="gaugeBlockedVisible"
+      title="点检打卡被工装校准拦截"
+      width="600px"
+    >
+      <el-result
+        icon="warning"
+        title="存在到期未校准或校准不合格的点检工装"
+        sub-title="卡尺 / 塞尺 / 百分表校准合格后，同一班次即可重新打卡"
+      />
+      <div v-if="gaugeBlockedDetail" class="blocked-body">
+        <div class="blocked-count">
+          共 <b>{{ gaugeBlockedDetail.count }}</b> 件工装不能用于本次点检，请先到“点检工装校准台”校准合格：
+        </div>
+        <el-table :data="gaugeBlockedDetail.items || []" size="small" stripe class="gauge-blocked-table">
+          <el-table-column prop="toolCode" label="工装编号" width="140">
+            <template #default="scope">
+              <el-tag type="danger" effect="plain" size="small">{{ scope.row.toolCode }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="toolTypeName" label="类型" width="80" align="center" />
+          <el-table-column prop="keeperTeam" label="保管班组" width="110" align="center" />
+          <el-table-column label="拦截原因" min-width="120">
+            <template #default="scope">
+              <el-tag
+                :type="scope.row.blockedReason === 'OVERDUE' ? 'danger' : 'warning'"
+                size="small"
+                effect="dark"
+              >
+                {{ scope.row.blockedReason === 'OVERDUE'
+                  ? `到期未校准（到期日 ${formatDate(scope.row.calibrationDueDate)}）`
+                  : '校准结论不合格' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="gaugeBlockedVisible = false">我知道了</el-button>
+        <el-button type="primary" @click="goGaugeCalibration">前往工装校准台</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { getLineTree } from '@/api/line'
 import { getInspectionOverview, createInspection, getBlockInspections } from '@/api/inspection'
-import { BIZ_CODE_INSPECTION_PENDING_RECHECK } from '@/utils/request'
+import { BIZ_CODE_INSPECTION_PENDING_RECHECK, BIZ_CODE_GAUGE_CALIBRATION_BLOCKED } from '@/utils/request'
 import dayjs from 'dayjs'
+
+const router = useRouter()
 
 const shiftOptions = [
   { value: 'MORNING', label: '早' },
@@ -369,6 +416,10 @@ const historyList = ref([])
 const blockedVisible = ref(false)
 const blockedDetail = ref(null)
 
+// 工装校准拦截明细（条数 + 超期工装编号清单），弹窗逐条展示
+const gaugeBlockedVisible = ref(false)
+const gaugeBlockedDetail = ref(null)
+
 function defaultForm() {
   return {
     blockId: null,
@@ -386,6 +437,7 @@ const checkRules = {
 }
 
 const formatTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-')
+const formatDate = (d) => (d ? dayjs(d).format('YYYY-MM-DD') : '-')
 
 const shiftText = (code) => {
   const opt = shiftOptions.find(o => o.value === code)
@@ -492,12 +544,21 @@ const submitCheck = async () => {
         // 结构化拦截：弹窗逐条列出挡块编号，提交未落库
         blockedDetail.value = e.detail
         blockedVisible.value = true
+      } else if (e.code === BIZ_CODE_GAUGE_CALIBRATION_BLOCKED && e.detail) {
+        // 工装校准拦截：弹窗逐条列出超期/不合格工装编号，提交未落库
+        gaugeBlockedDetail.value = e.detail
+        gaugeBlockedVisible.value = true
       }
       // 其他错误由请求拦截器统一提示；弹窗保持打开便于修改
     } finally {
       submitting.value = false
     }
   })
+}
+
+const goGaugeCalibration = () => {
+  gaugeBlockedVisible.value = false
+  router.push('/gauge-calibration')
 }
 
 const openHistory = async (row) => {

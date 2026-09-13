@@ -45,6 +45,11 @@ const routes = [
     path: '/inspections',
     name: 'BlockInspections',
     component: () => import('@/views/BlockInspections.vue')
+  },
+  {
+    path: '/gauge-calibration',
+    name: 'GaugeCalibrations',
+    component: () => import('@/views/GaugeCalibrations.vue')
   }
 ]
 

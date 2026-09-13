@@ -51,6 +51,10 @@
             <el-icon><CircleCheckFilled /></el-icon>
             <span>挡块班次点检</span>
           </el-menu-item>
+          <el-menu-item index="/gauge-calibration">
+            <el-icon><SetUp /></el-icon>
+            <span>点检工装校准台</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main class="app-main">

@@ -44,4 +44,13 @@ public class Result<T> {
         result.setData(data);
         return result;
     }
+
+    /** 班次点检打卡被超期/不合格工装拦截：专用错误码 + 结构化明细（条数/工装编号清单） */
+    public static <T> Result<T> gaugeCalibrationBlocked(String message, T data) {
+        Result<T> result = new Result<>();
+        result.setCode(4092);
+        result.setMessage(message);
+        result.setData(data);
+        return result;
+    }
 }

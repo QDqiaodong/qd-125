@@ -1,6 +1,7 @@
 package com.bufferblock.config;
 
 import com.bufferblock.dto.Result;
+import com.bufferblock.exception.GaugeCalibrationBlockedException;
 import com.bufferblock.exception.InspectionPendingRecheckException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +50,19 @@ public class GlobalExceptionHandler {
         log.warn("点检提交被待复检挡块拦截: {}", e.getMessage());
         return Result.inspectionPendingRecheck(
                 e.getMessage() != null ? e.getMessage() : "本产线该班次尚有未复检通过的不可用挡块",
+                e.getDetail());
+    }
+
+    /**
+     * 班次点检打卡被“到期未校准或校准结论不合格的工装”拦截：
+     * 返回专用错误码与结构化明细（条数 + 超期工装编号清单），前端逐条列出。
+     */
+    @ExceptionHandler(GaugeCalibrationBlockedException.class)
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public Result<?> handleGaugeCalibrationBlocked(GaugeCalibrationBlockedException e) {
+        log.warn("班次点检打卡被超期/不合格工装拦截: {}", e.getMessage());
+        return Result.gaugeCalibrationBlocked(
+                e.getMessage() != null ? e.getMessage() : "存在到期未校准或校准不合格的点检工装",
                 e.getDetail());
     }
 

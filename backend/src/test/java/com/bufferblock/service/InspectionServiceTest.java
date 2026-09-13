@@ -1,6 +1,7 @@
 package com.bufferblock.service;
 
 import com.bufferblock.dto.BufferBlockDTO;
+import com.bufferblock.dto.GaugeBlockedVO;
 import com.bufferblock.dto.InspectionCreateDTO;
 import com.bufferblock.dto.InspectionItemVO;
 import com.bufferblock.dto.InspectionOverviewVO;
@@ -9,11 +10,16 @@ import com.bufferblock.dto.InspectionPendingRecheckVO;
 import com.bufferblock.dto.InspectionQueryDTO;
 import com.bufferblock.entity.BlockInspection;
 import com.bufferblock.entity.BufferBlock;
+import com.bufferblock.entity.GaugeCalibration;
+import com.bufferblock.entity.GaugeTool;
 import com.bufferblock.entity.ProductionLine;
+import com.bufferblock.exception.GaugeCalibrationBlockedException;
 import com.bufferblock.exception.InspectionPendingRecheckException;
 import com.bufferblock.repository.BlockInspectionRepository;
 import com.bufferblock.repository.BlockLineBindingRepository;
 import com.bufferblock.repository.BufferBlockRepository;
+import com.bufferblock.repository.GaugeCalibrationRepository;
+import com.bufferblock.repository.GaugeToolRepository;
 import com.bufferblock.repository.ProductionLineRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,6 +52,10 @@ class InspectionServiceTest {
     private ProductionLineRepository lineRepository;
     @Autowired
     private BlockLineBindingRepository bindingRepository;
+    @Autowired
+    private GaugeToolRepository gaugeToolRepository;
+    @Autowired
+    private GaugeCalibrationRepository gaugeCalibrationRepository;
 
     private ProductionLine workshopA;
     private ProductionLine lineA1;
@@ -58,6 +69,8 @@ class InspectionServiceTest {
         bindingRepository.deleteAll();
         blockRepository.deleteAll();
         lineRepository.deleteAll();
+        gaugeCalibrationRepository.deleteAll();
+        gaugeToolRepository.deleteAll();
 
         workshopA = saveWorkshop("INSP-WA", "一车间");
         lineA1 = saveLine("INSP-LA1", "点检A1号线", workshopA.getId());
@@ -350,6 +363,91 @@ class InspectionServiceTest {
                 .filter(dto -> dto.getId().equals(block.getId()))
                 .findFirst().orElseThrow().getLastInspectionResult())
                 .isEqualTo("UNUSABLE");
+    }
+
+    @Test
+    void checkInBlockedWhenGaugeOverdueAndPassesAfterCalibrationSameShift() {
+        BufferBlock block = createBoundBlock("BLK-GG-1", lineA1.getId());
+
+        // 一把卡尺到期未校准
+        GaugeTool overdue = createGauge("KC-GG-1", GaugeTool.TYPE_CALIPER,
+                LocalDate.now().minusDays(1), "总装一班");
+
+        // 早班打卡被工装闸门拦住，明细列出超期工装编号，点检不落库
+        assertThatThrownBy(() -> checkIn(block.getId(), "MORNING", "USABLE", "点检人甲",
+                LocalDateTime.now(), null))
+                .isInstanceOf(GaugeCalibrationBlockedException.class)
+                .hasMessageContaining("KC-GG-1")
+                .satisfies(ex -> {
+                    GaugeBlockedVO detail =
+                            (GaugeBlockedVO) ((GaugeCalibrationBlockedException) ex).getDetail();
+                    assertThat(detail.getCount()).isEqualTo(1);
+                    assertThat(detail.getCodes()).containsExactly("KC-GG-1");
+                });
+        assertThat(inspectionService.getLatest(block.getId())).isNull();
+
+        // 卡尺校准合格，到期日同步到一年后
+        passGaugeCalibration(overdue.getId(), LocalDate.now().plusYears(1));
+
+        // 同一班次（早班）再打卡应能通过
+        checkIn(block.getId(), "MORNING", "USABLE", "点检人甲", LocalDateTime.now(), null);
+        assertThat(inspectionService.getLatest(block.getId()).getResult()).isEqualTo("USABLE");
+    }
+
+    @Test
+    void checkInBlockedWhenGaugeCalibrationFailed() {
+        BufferBlock block = createBoundBlock("BLK-GG-2", lineA1.getId());
+        GaugeTool failed = createGauge("SC-GG-1", GaugeTool.TYPE_FEELER,
+                LocalDate.now().plusDays(60), "总装一班");
+        failGaugeCalibration(failed.getId(), LocalDate.now().minusDays(1),
+                LocalDate.now().plusDays(60));
+
+        // 即使到期日还没到，最近结论不合格也要拦住打卡
+        assertThatThrownBy(() -> checkIn(block.getId(), "NIGHT", "USABLE", "点检人乙",
+                LocalDateTime.now(), null))
+                .isInstanceOf(GaugeCalibrationBlockedException.class)
+                .satisfies(ex -> {
+                    GaugeBlockedVO detail =
+                            (GaugeBlockedVO) ((GaugeCalibrationBlockedException) ex).getDetail();
+                    assertThat(detail.getCodes()).containsExactly("SC-GG-1");
+                });
+        assertThat(inspectionService.getLatest(block.getId())).isNull();
+    }
+
+    private GaugeTool createGauge(String code, String type, LocalDate dueDate, String team) {
+        GaugeTool tool = new GaugeTool();
+        tool.setToolCode(code);
+        tool.setToolType(type);
+        tool.setCalibrationDueDate(dueDate);
+        tool.setKeeperTeam(team);
+        tool.setDisabled(0);
+        return gaugeToolRepository.save(tool);
+    }
+
+    private void passGaugeCalibration(Long toolId, LocalDate nextDueDate) {
+        GaugeCalibration calibration = new GaugeCalibration();
+        calibration.setToolId(toolId);
+        calibration.setCalibrationDate(LocalDate.now());
+        calibration.setResult(GaugeCalibration.RESULT_PASS);
+        calibration.setValidUntil(nextDueDate);
+        calibration.setNextDueDate(nextDueDate);
+        calibration.setCalibrator("校准员甲");
+        gaugeCalibrationRepository.save(calibration);
+        gaugeToolRepository.findById(toolId).ifPresent(t -> {
+            t.setCalibrationDueDate(nextDueDate);
+            gaugeToolRepository.save(t);
+        });
+    }
+
+    private void failGaugeCalibration(Long toolId, LocalDate calibrationDate, LocalDate nextDueDate) {
+        GaugeCalibration calibration = new GaugeCalibration();
+        calibration.setToolId(toolId);
+        calibration.setCalibrationDate(calibrationDate);
+        calibration.setResult(GaugeCalibration.RESULT_FAIL);
+        calibration.setValidUntil(nextDueDate);
+        calibration.setNextDueDate(nextDueDate);
+        calibration.setCalibrator("校准员甲");
+        gaugeCalibrationRepository.save(calibration);
     }
 
     private ProductionLine saveWorkshop(String code, String name) {

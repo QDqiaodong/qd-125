@@ -45,15 +45,18 @@ public class InspectionService {
     private final BufferBlockRepository blockRepository;
     private final BlockLineBindingRepository bindingRepository;
     private final ProductionLineService productionLineService;
+    private final GaugeCalibrationService gaugeCalibrationService;
 
     public InspectionService(BlockInspectionRepository inspectionRepository,
                              BufferBlockRepository blockRepository,
                              BlockLineBindingRepository bindingRepository,
-                             ProductionLineService productionLineService) {
+                             ProductionLineService productionLineService,
+                             GaugeCalibrationService gaugeCalibrationService) {
         this.inspectionRepository = inspectionRepository;
         this.blockRepository = blockRepository;
         this.bindingRepository = bindingRepository;
         this.productionLineService = productionLineService;
+        this.gaugeCalibrationService = gaugeCalibrationService;
     }
 
     /** 某挡块的完整点检记录（最近一次在前） */
@@ -184,6 +187,11 @@ public class InspectionService {
     @Transactional
     public InspectionCheckInResult createInspection(InspectionCreateDTO dto) {
         validate(dto);
+
+        // 点检工装闸门（全产线共用前提）：存在到期未校准或校准结论不合格的在期工装时，
+        // 普通打卡与复检打卡一律先拦住并列出超期工装编号，不落任何点检记录；
+        // 工装校准合格后同一班次再打卡即可通过。
+        gaugeCalibrationService.assertNoBlockedTools();
 
         BufferBlock block = blockRepository.findByIdForUpdate(dto.getBlockId())
                 .orElseThrow(() -> new RuntimeException("挡块不存在"));
