@@ -439,7 +439,9 @@ public class GaugeCalibrationService {
     }
 
     private boolean isValidType(String type) {
-        return TYPE_CALIPER.equals(type) || TYPE_FEELER.equals(type) || TYPE_DIAL_INDICATOR.equals(type);
+        return GaugeTool.TYPE_CALIPER.equals(type)
+                || GaugeTool.TYPE_FEELER.equals(type)
+                || GaugeTool.TYPE_DIAL_INDICATOR.equals(type);
     }
 
     private String normalize(String value) {
@@ -453,9 +455,9 @@ public class GaugeCalibrationService {
     /** 工装类型编码转中文名 */
     public static String typeName(String type) {
         return switch (type == null ? "" : type) {
-            case TYPE_CALIPER -> "卡尺";
-            case TYPE_FEELER -> "塞尺";
-            case TYPE_DIAL_INDICATOR -> "百分表";
+            case GaugeTool.TYPE_CALIPER -> "卡尺";
+            case GaugeTool.TYPE_FEELER -> "塞尺";
+            case GaugeTool.TYPE_DIAL_INDICATOR -> "百分表";
             default -> type;
         };
     }
