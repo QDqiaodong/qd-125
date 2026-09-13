@@ -304,8 +304,10 @@ class StocktakeServiceTest {
 
     @Test
     void completedBatchBlocksCountingAndCanReopen() {
-        createBlock("PD-BLK-080", countedLine, true);
+        BufferBlock block = createBlock("PD-BLK-080", countedLine, true);
         Long batchId = stocktakeService.createBatch(createDto()).getId();
+        // 全部盘到且无差异，结束盘点才能封账成功
+        stocktakeService.countItem(batchId, countDto(block.getBlockCode()));
         stocktakeService.finishBatch(batchId);
 
         BufferBlock another = createBlock("PD-BLK-081", null, false);

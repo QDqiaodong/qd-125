@@ -47,6 +47,7 @@ public class StocktakeService {
     private final TransferFlowRecordRepository flowRecordRepository;
     private final ProductionLineService productionLineService;
     private final StocktakeNumberService numberService;
+    private final StocktakeClosingSupport closingSupport;
 
     public StocktakeService(StocktakeBatchRepository batchRepository,
                             StocktakeItemRepository itemRepository,
@@ -55,7 +56,8 @@ public class StocktakeService {
                             BlockTransferRepository transferRepository,
                             TransferFlowRecordRepository flowRecordRepository,
                             ProductionLineService productionLineService,
-                            StocktakeNumberService numberService) {
+                            StocktakeNumberService numberService,
+                            StocktakeClosingSupport closingSupport) {
         this.batchRepository = batchRepository;
         this.itemRepository = itemRepository;
         this.blockRepository = blockRepository;
@@ -64,6 +66,7 @@ public class StocktakeService {
         this.flowRecordRepository = flowRecordRepository;
         this.productionLineService = productionLineService;
         this.numberService = numberService;
+        this.closingSupport = closingSupport;
     }
 
     // ------------------------------------------------------------------
@@ -168,22 +171,19 @@ public class StocktakeService {
 
     /**
      * 结束盘点：剩余“待盘”行统一标记为缺失差异；存在待处理差异时不允许封账（差异闭环）。
+     * 缺失标记与统计重算由 StocktakeClosingSupport 在独立事务中先行提交，
+     * 因此封账被拒后缺失标记仍然保留，刷新批次明细即可看到缺失行并继续确认/忽略；
+     * 本方法自身不开启外层事务，避免拒绝封账时的回滚把已提交的标记与统计一并带走。
      */
-    @Transactional
     public StocktakeBatch finishBatch(Long batchId) {
         getCountingBatch(batchId);
-        // markWaitingAsMissing 会清空一级缓存，其后全部实体需要重新查询，避免托管态与批量更新不一致
-        int turnedMissing = itemRepository.markWaitingAsMissing(batchId);
+        int turnedMissing = closingSupport.markWaitingAsMissing(batchId);
         StocktakeBatch batch = batchRepository.findById(batchId).orElseThrow();
-        recomputeCounters(batchId);
-        batch = batchRepository.findById(batchId).orElseThrow();
         if (batch.getPendingCount() > 0) {
             throw new RuntimeException("仍有 " + batch.getPendingCount() + " 条待处理差异，请全部确认或忽略后再结束盘点"
                     + (turnedMissing > 0 ? "（其中 " + turnedMissing + " 件应盘未盘已自动标记为缺失）" : ""));
         }
-        batch.setStatus(StocktakeBatch.STATUS_COMPLETED);
-        batch.setFinishTime(LocalDateTime.now());
-        batch = batchRepository.save(batch);
+        batch = closingSupport.completeBatch(batchId);
         enrichBatch(batch);
         return batch;
     }
@@ -199,7 +199,7 @@ public class StocktakeService {
         batch.setStatus(StocktakeBatch.STATUS_COUNTING);
         batch.setFinishTime(null);
         batch = batchRepository.save(batch);
-        recomputeCounters(batchId);
+        closingSupport.recomputeCounters(batchId);
         enrichBatch(batch);
         return batch;
     }
@@ -283,7 +283,7 @@ public class StocktakeService {
         item.setHandleTime(null);
 
         item = itemRepository.save(item);
-        recomputeCounters(batchId);
+        closingSupport.recomputeCounters(batchId);
         enrichItem(item);
         return item;
     }
@@ -332,7 +332,7 @@ public class StocktakeService {
         item.setHandleNote(dto.getHandleNote().trim());
         item.setHandleTime(LocalDateTime.now());
         item = itemRepository.save(item);
-        recomputeCounters(batchId);
+        closingSupport.recomputeCounters(batchId);
         enrichItem(item);
         return item;
     }
@@ -347,7 +347,7 @@ public class StocktakeService {
             throw new RuntimeException("仅盘盈录入记录可删除");
         }
         itemRepository.delete(item);
-        recomputeCounters(batchId);
+        closingSupport.recomputeCounters(batchId);
     }
 
     // ------------------------------------------------------------------
@@ -488,43 +488,6 @@ public class StocktakeService {
             return StocktakeItem.DIFF_DUPLICATE;
         }
         return StocktakeItem.DIFF_NONE;
-    }
-
-    /**
-     * 重算批次冗余统计（列表展示与闭环校验共用同一口径）：
-     * totalCount-应盘数；countedCount-去重已盘/盘盈数；
-     * discrepancyCount-差异数；pendingCount-待处理差异数。
-     * 在调用方事务内执行，保证录入/处理与统计同事务落库。
-     */
-    private void recomputeCounters(Long batchId) {
-        StocktakeBatch batch = batchRepository.findById(batchId).orElseThrow();
-        List<StocktakeItem> items = itemRepository.findByBatchIdOrderByIsExtraAscIsCountedAscIdAsc(batchId);
-
-        int total = 0;
-        int counted = 0;
-        int discrepancy = 0;
-        int pending = 0;
-        for (StocktakeItem item : items) {
-            if (Integer.valueOf(0).equals(item.getIsExtra())) {
-                total++;
-            }
-            if (Integer.valueOf(1).equals(item.getIsCounted())) {
-                counted++;
-            }
-            boolean waiting = Integer.valueOf(0).equals(item.getIsCounted())
-                    && StocktakeItem.DIFF_NONE.equals(item.getDiscrepancyType());
-            if (!waiting && !StocktakeItem.DIFF_NONE.equals(item.getDiscrepancyType())) {
-                discrepancy++;
-                if (StocktakeItem.STATUS_PENDING.equals(item.getDiscrepancyStatus())) {
-                    pending++;
-                }
-            }
-        }
-        batch.setTotalCount(total);
-        batch.setCountedCount(counted);
-        batch.setDiscrepancyCount(discrepancy);
-        batch.setPendingCount(pending);
-        batchRepository.save(batch);
     }
 
     private StocktakeBatch getCountingBatch(Long batchId) {
