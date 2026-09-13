@@ -40,6 +40,11 @@ const routes = [
     path: '/handovers',
     name: 'ShiftHandovers',
     component: () => import('@/views/ShiftHandovers.vue')
+  },
+  {
+    path: '/inspections',
+    name: 'BlockInspections',
+    component: () => import('@/views/BlockInspections.vue')
   }
 ]
 

@@ -93,6 +93,26 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="最近点检" width="150" align="center">
+          <template #default="scope">
+            <el-tooltip
+              v-if="scope.row.lastInspectionResult"
+              effect="dark"
+              placement="top"
+            >
+              <template #content>
+                <div>{{ formatTime(scope.row.lastInspectionTime) }} · {{ inspectionShiftText(scope.row.lastInspectionShift) }}班</div>
+                <div>点检人：{{ scope.row.lastInspector }}</div>
+                <div v-if="scope.row.lastInspectionNote">备注：{{ scope.row.lastInspectionNote }}</div>
+              </template>
+              <el-tag :type="scope.row.lastInspectionResult === 'USABLE' ? 'success' : 'danger'" size="small" effect="plain">
+                {{ scope.row.lastInspectionResult === 'USABLE' ? '可用' : '不可用' }}
+                {{ dayjs(scope.row.lastInspectionTime).format('MM-DD') }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else type="info" size="small">未点检</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="借用状态" width="170" align="center">
           <template #default="scope">
             <el-tooltip
@@ -193,6 +213,19 @@
         <el-descriptions-item label="适配输送机型" :span="2">{{ currentDetail.adapterModel }}</el-descriptions-item>
         <el-descriptions-item label="厚度规格">{{ currentDetail.thickness }} mm</el-descriptions-item>
         <el-descriptions-item label="当前产线">{{ currentDetail.lineName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="最近班次点检">
+          <template v-if="currentDetail.lastInspectionResult">
+            <el-tag :type="currentDetail.lastInspectionResult === 'USABLE' ? 'success' : 'danger'" size="small" effect="dark">
+              {{ currentDetail.lastInspectionResult === 'USABLE' ? '可用' : '不可用' }}
+            </el-tag>
+            <span style="margin-left:6px;color:#606266;font-size:12px;">
+              {{ formatTime(currentDetail.lastInspectionTime) }} ·
+              {{ inspectionShiftText(currentDetail.lastInspectionShift) }}班 ·
+              {{ currentDetail.lastInspector }}
+            </span>
+          </template>
+          <el-tag v-else type="info" size="small">未点检</el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="借用状态">
           <el-tag v-if="currentDetail.borrowedOut"
                   :type="borrowMeta(currentDetail.borrowStatus, !!currentDetail.borrowOverdueReturn).type"
@@ -261,8 +294,7 @@
       </el-table>
 
       <el-divider content-position="left">借用记录</el-divider>
-      <el-table :data="borrowHistory" stripe size="small" :row-class-name="borrowRowClassName">
-        <el-table-column prop="reservationNo" label="预约单号" width="170" />
+      <el-table :data="borrowHistory" stripe size="small" :row-class-name="borrowRowClassName">        <el-table-column prop="reservationNo" label="预约单号" width="170" />
         <el-table-column prop="teamName" label="借用班组" width="110" />
         <el-table-column label="实际取走" width="170">
           <template #default="scope">
@@ -314,6 +346,27 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-divider content-position="left">班次点检记录</el-divider>
+      <el-table :data="inspectionHistory" stripe size="small">
+        <el-table-column label="打卡时刻" width="170">
+          <template #default="scope">{{ formatTime(scope.row.inspectionTime) }}</template>
+        </el-table-column>
+        <el-table-column label="班次" width="80" align="center">
+          <template #default="scope">{{ inspectionShiftText(scope.row.shiftCode) }}班</template>
+        </el-table-column>
+        <el-table-column prop="inspector" label="点检人" width="100" />
+        <el-table-column label="结论" width="90" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.result === 'USABLE' ? 'success' : 'danger'" size="small" effect="dark">
+              {{ scope.row.result === 'USABLE' ? '可用' : '不可用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="note" label="备注" min-width="140" show-overflow-tooltip>
+          <template #default="scope">{{ scope.row.note || '-' }}</template>
+        </el-table-column>
+      </el-table>
     </el-dialog>
 
     <due-soon-list-dialog
@@ -338,6 +391,7 @@ import {
 import { getTransfersByBlockId } from '@/api/transfer'
 import { getBorrowReservationsByBlock } from '@/api/borrow'
 import { getDueSoonCalibrations } from '@/api/calibration'
+import { getBlockInspections } from '@/api/inspection'
 import DueSoonListDialog from '@/components/DueSoonListDialog.vue'
 import { getLeafLines } from '@/api/line'
 import dayjs from 'dayjs'
@@ -374,6 +428,7 @@ const currentDetail = ref(null)
 const bindingHistory = ref([])
 const transferHistory = ref([])
 const borrowHistory = ref([])
+const inspectionHistory = ref([])
 
 const dueSoon = ref({
   windowDays: 30,
@@ -417,6 +472,11 @@ const borrowMeta = (status, overdueReturn = false) => {
 }
 
 const borrowRowClassName = ({ row }) => (row.overdueReturn ? 'borrow-overdue-row' : '')
+
+const inspectionShiftText = (code) => {
+  const map = { MORNING: '早', AFTERNOON: '中', NIGHT: '晚' }
+  return map[code] || (code ? code : '-')
+}
 
 const filteredBlocks = computed(() => {
   let result = allBlocks.value
@@ -515,10 +575,11 @@ const viewDetail = async (row) => {
   currentDetail.value = row
   detailVisible.value = true
   try {
-    [bindingHistory.value, transferHistory.value, borrowHistory.value] = await Promise.all([
+    [bindingHistory.value, transferHistory.value, borrowHistory.value, inspectionHistory.value] = await Promise.all([
       getBlockBindings(row.id),
       getTransfersByBlockId(row.id),
-      getBorrowReservationsByBlock(row.id)
+      getBorrowReservationsByBlock(row.id),
+      getBlockInspections(row.id)
     ])
   } catch (e) {
     // ignore

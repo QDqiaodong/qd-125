@@ -60,6 +60,17 @@ public class BufferBlockDTO {
     /** 超期未还时长（派生展示） */
     private String borrowOverdueReturnDuration;
 
+    /** 最近一次班次点检时刻（从未点检为 null），从 block_inspection 实时派生 */
+    private LocalDateTime lastInspectionTime;
+    /** 最近一次点检班次：MORNING-早班 / AFTERNOON-中班 / NIGHT-晚班 */
+    private String lastInspectionShift;
+    /** 最近一次点检人 */
+    private String lastInspector;
+    /** 最近一次点检结论：USABLE-可用 / UNUSABLE-不可用 */
+    private String lastInspectionResult;
+    /** 最近一次点检备注 */
+    private String lastInspectionNote;
+
     public BufferBlockDTO() {
     }
 
@@ -155,4 +166,19 @@ public class BufferBlockDTO {
 
     public String getBorrowOverdueReturnDuration() { return borrowOverdueReturnDuration; }
     public void setBorrowOverdueReturnDuration(String borrowOverdueReturnDuration) { this.borrowOverdueReturnDuration = borrowOverdueReturnDuration; }
+
+    public LocalDateTime getLastInspectionTime() { return lastInspectionTime; }
+    public void setLastInspectionTime(LocalDateTime lastInspectionTime) { this.lastInspectionTime = lastInspectionTime; }
+
+    public String getLastInspectionShift() { return lastInspectionShift; }
+    public void setLastInspectionShift(String lastInspectionShift) { this.lastInspectionShift = lastInspectionShift; }
+
+    public String getLastInspector() { return lastInspector; }
+    public void setLastInspector(String lastInspector) { this.lastInspector = lastInspector; }
+
+    public String getLastInspectionResult() { return lastInspectionResult; }
+    public void setLastInspectionResult(String lastInspectionResult) { this.lastInspectionResult = lastInspectionResult; }
+
+    public String getLastInspectionNote() { return lastInspectionNote; }
+    public void setLastInspectionNote(String lastInspectionNote) { this.lastInspectionNote = lastInspectionNote; }
 }

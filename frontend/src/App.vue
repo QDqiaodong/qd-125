@@ -47,6 +47,10 @@
             <el-icon><SwitchButton /></el-icon>
             <span>班组交班</span>
           </el-menu-item>
+          <el-menu-item index="/inspections">
+            <el-icon><CircleCheckFilled /></el-icon>
+            <span>挡块班次点检</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main class="app-main">

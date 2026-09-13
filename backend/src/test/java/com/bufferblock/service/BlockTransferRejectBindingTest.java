@@ -98,7 +98,7 @@ class BlockTransferRejectBindingTest {
         assertThat(ledger.getHandleTime()).isNotNull();
 
         assertThat(bufferBlockService.getById(block.getId()).getLineId()).isEqualTo(fromLine.getId());
-        assertThat(bufferBlockService.getTransfersByBlockId(block.getId()))
+        assertThat(transferService.getTransfersByBlockId(block.getId()))
                 .singleElement()
                 .extracting(BlockTransfer::getTransferNo, BlockTransfer::getStatus,
                         BlockTransfer::getFromLineId, BlockTransfer::getToLineId)

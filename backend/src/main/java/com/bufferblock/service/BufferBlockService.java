@@ -3,6 +3,7 @@ package com.bufferblock.service;
 import com.bufferblock.dto.BufferBlockDTO;
 import com.bufferblock.dto.CalibrationStatusVO;
 import com.bufferblock.entity.BlockBorrowReservation;
+import com.bufferblock.entity.BlockInspection;
 import com.bufferblock.entity.BlockLineBinding;
 import com.bufferblock.entity.BlockTransfer;
 import com.bufferblock.entity.BufferBlock;
@@ -31,6 +32,7 @@ public class BufferBlockService {
     private final BlockTransferRepository blockTransferRepository;
     private final ProductionLineService productionLineService;
     private final CalibrationService calibrationService;
+    private final InspectionService inspectionService;
     /**
      * 借用预约服务反向依赖本服务（锁档、查绑定），这里用 ObjectProvider 延迟解析，
      * 打破两个服务之间的构造器循环依赖。
@@ -42,24 +44,28 @@ public class BufferBlockService {
                               BlockTransferRepository blockTransferRepository,
                               ProductionLineService productionLineService,
                               CalibrationService calibrationService,
+                              InspectionService inspectionService,
                               ObjectProvider<BorrowReservationService> borrowReservationServiceProvider) {
         this.bufferBlockRepository = bufferBlockRepository;
         this.blockLineBindingRepository = blockLineBindingRepository;
         this.blockTransferRepository = blockTransferRepository;
         this.productionLineService = productionLineService;
         this.calibrationService = calibrationService;
+        this.inspectionService = inspectionService;
         this.borrowReservationServiceProvider = borrowReservationServiceProvider;
     }
 
     public List<BufferBlockDTO> getAllBlocks() {
         List<BufferBlock> blocks = bufferBlockRepository.findAll();
         Map<Long, CalibrationStatusVO> statusMap = calibrationService.statusMapOfBlocks(blocks);
+        Map<Long, BlockInspection> inspectionMap = inspectionService.latestMapOfBlocks(blocks);
         Map<Long, String> pendingMap = pendingTransferNoMap();
         Map<Long, BlockBorrowReservation> borrowMap =
                 borrowReservationServiceProvider.getObject().activeReservationMap();
         return blocks.stream()
                 .map(block -> withBorrowMark(
-                        withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap),
+                        withPendingTransfer(convertToDTO(block, statusMap.get(block.getId()),
+                                inspectionMap.get(block.getId())), pendingMap),
                         borrowMap))
                 .collect(Collectors.toList());
     }
@@ -69,7 +75,8 @@ public class BufferBlockService {
         if (block == null) {
             return null;
         }
-        BufferBlockDTO dto = convertToDTO(block, calibrationService.statusOf(id));
+        BufferBlockDTO dto = convertToDTO(block, calibrationService.statusOf(id),
+                inspectionService.getLatest(id));
         // 单挡块详情同样叠加借用占用标记（含空闲时显式置 false），保证档案与预约状态口径一致
         Map<Long, BlockBorrowReservation> borrowMap = new HashMap<>();
         BlockBorrowReservation reservation =
@@ -175,13 +182,15 @@ public class BufferBlockService {
             bufferBlockRepository.findById(binding.getBlockId()).ifPresent(blocks::add);
         }
         Map<Long, CalibrationStatusVO> statusMap = calibrationService.statusMapOfBlocks(blocks);
+        Map<Long, BlockInspection> inspectionMap = inspectionService.latestMapOfBlocks(blocks);
         Map<Long, String> pendingMap = pendingTransferNoMap();
         Map<Long, BlockBorrowReservation> borrowMap =
                 borrowReservationServiceProvider.getObject().activeReservationMap();
         List<BufferBlockDTO> result = new ArrayList<>();
         for (BufferBlock block : blocks) {
             result.add(withBorrowMark(
-                    withPendingTransfer(convertToDTO(block, statusMap.get(block.getId())), pendingMap),
+                    withPendingTransfer(convertToDTO(block, statusMap.get(block.getId()),
+                            inspectionMap.get(block.getId())), pendingMap),
                     borrowMap));
         }
         return result;
@@ -262,7 +271,8 @@ public class BufferBlockService {
         return bindings;
     }
 
-    private BufferBlockDTO convertToDTO(BufferBlock block, CalibrationStatusVO status) {
+    private BufferBlockDTO convertToDTO(BufferBlock block, CalibrationStatusVO status,
+                                        BlockInspection latestInspection) {
         BufferBlockDTO dto = new BufferBlockDTO();
         dto.setId(block.getId());
         dto.setBlockCode(block.getBlockCode());
@@ -294,6 +304,14 @@ public class BufferBlockService {
             dto.setNextDueDate(status.getNextDueDate());
             dto.setOverdueDays(status.getOverdueDays());
             dto.setDaysUntilDue(status.getDaysUntilDue());
+        }
+
+        if (latestInspection != null) {
+            dto.setLastInspectionTime(latestInspection.getInspectionTime());
+            dto.setLastInspectionShift(latestInspection.getShiftCode());
+            dto.setLastInspector(latestInspection.getInspector());
+            dto.setLastInspectionResult(latestInspection.getResult());
+            dto.setLastInspectionNote(latestInspection.getNote());
         }
         return dto;
     }
