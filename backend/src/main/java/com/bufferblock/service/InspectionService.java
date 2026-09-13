@@ -3,11 +3,14 @@ package com.bufferblock.service;
 import com.bufferblock.dto.InspectionCreateDTO;
 import com.bufferblock.dto.InspectionItemVO;
 import com.bufferblock.dto.InspectionOverviewVO;
+import com.bufferblock.dto.InspectionPendingRecheckItemVO;
+import com.bufferblock.dto.InspectionPendingRecheckVO;
 import com.bufferblock.dto.InspectionQueryDTO;
 import com.bufferblock.entity.BlockInspection;
 import com.bufferblock.entity.BlockLineBinding;
 import com.bufferblock.entity.BufferBlock;
 import com.bufferblock.entity.ProductionLine;
+import com.bufferblock.exception.InspectionPendingRecheckException;
 import com.bufferblock.repository.BlockInspectionRepository;
 import com.bufferblock.repository.BlockLineBindingRepository;
 import com.bufferblock.repository.BufferBlockRepository;
@@ -16,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -28,7 +32,10 @@ import java.util.Set;
  *     <li>点检台账按产线（车间节点取其下全部产线）筛选当前绑定在产线上的在用挡块；</li>
  *     <li>每块挡块每个班次由点检人打卡“可用/不可用”，点检人、班次、结论与时刻全部落库；</li>
  *     <li>台账行与挡块档案展示的“最近一次点检结论”全部由已落库记录实时派生（同一份数据源），
- *     刷新或重进页面后条数与列表保持一致。</li>
+ *     刷新或重进页面后条数与列表保持一致；</li>
+ *     <li>提交拦截：本产线同一班次已有“不可用且至今未复检通过”的其他挡块时，普通点检提交被拦截，
+ *     响应逐条列出待复检挡块编号与条数；对这些挡块自身的复检打卡先落库（复检动作不被彼此阻塞，
+ *     避免多块不可用时谁都无法复检），再返回仍未复检通过的挡块清单；复检全部通过后提交恢复正常。</li>
  * </ul>
  */
 @Service
@@ -78,6 +85,8 @@ public class InspectionService {
     /**
      * 点检台账概览：按产线筛选在用挡块，逐块带出最近一次点检结论，
      * 并从同一份清单统计可用/不可用/未点检条数。
+     * “待复检通过”清单只按产线范围派生（不受班次/结论/关键字筛选影响），
+     * 与提交拦截同源于已落库点检记录，刷新后条数与编号对得上。
      */
     public InspectionOverviewVO getOverview(InspectionQueryDTO query) {
         Set<Long> targetLineIds = resolveTargetLineIds(query == null ? null : query.getLineId());
@@ -103,6 +112,34 @@ public class InspectionService {
         Map<Long, BlockInspection> latestMap = latestMapOfBlocks(blocks);
 
         InspectionOverviewVO overview = new InspectionOverviewVO();
+        // 待复检清单：产线范围内、最近一次点检结论仍为“不可用”的在用挡块（不受列表筛选条件影响）
+        List<InspectionPendingRecheckItemVO> pendingItems = new ArrayList<>();
+        for (BufferBlock block : blocks) {
+            BlockInspection latest = latestMap.get(block.getId());
+            if (latest != null && BlockInspection.RESULT_UNUSABLE.equals(latest.getResult())) {
+                BlockLineBinding binding = bindingByBlock.get(block.getId());
+                InspectionPendingRecheckItemVO pending = new InspectionPendingRecheckItemVO();
+                pending.setBlockId(block.getId());
+                pending.setBlockCode(block.getBlockCode());
+                pending.setShiftCode(latest.getShiftCode());
+                pending.setShiftName(shiftName(latest.getShiftCode()));
+                if (binding != null) {
+                    pending.setLineId(binding.getLineId());
+                    ProductionLine line = productionLineService.getById(binding.getLineId());
+                    if (line != null) {
+                        pending.setLineName(line.getLineName());
+                    }
+                }
+                pendingItems.add(pending);
+            }
+        }
+        pendingItems.sort(Comparator
+                .comparing((InspectionPendingRecheckItemVO p) -> shiftOrder(p.getShiftCode()))
+                .thenComparing(p -> p.getLineName() == null ? "" : p.getLineName())
+                .thenComparing(InspectionPendingRecheckItemVO::getBlockCode));
+        overview.setPendingRecheckItems(pendingItems);
+        overview.setPendingRecheckCount(pendingItems.size());
+
         for (BufferBlock block : blocks) {
             BlockInspection latest = latestMap.get(block.getId());
             if (!matchesFilters(latest, shiftFilter, resultFilter, keyword, block)) {
@@ -135,9 +172,17 @@ public class InspectionService {
 
     /**
      * 班次点检打卡。挡块必须在用且当前绑定在产线上；点检人、班次、结论同事务落库。
+     * <p>
+     * 提交拦截口径：本产线同一班次已存在“最近一次结论仍为不可用”的其他在用挡块时——
+     * <ul>
+     *     <li>普通点检（本挡块当前不在待复检集合）直接拦截，事务回滚，返回待复检挡块编号清单；</li>
+     *     <li>对不可用挡块自身的复检允许落库（避免多块不可用时互相锁死），
+     *     复检为“可用”后该挡块即移出待复检集合，全部复检通过后再提交不再拦截；
+     *     返回结果同时携带本产线该班次仍未复检通过的挡块清单供前端提示。</li>
+     * </ul>
      */
     @Transactional
-    public BlockInspection createInspection(InspectionCreateDTO dto) {
+    public InspectionCheckInResult createInspection(InspectionCreateDTO dto) {
         validate(dto);
 
         BufferBlock block = blockRepository.findByIdForUpdate(dto.getBlockId())
@@ -150,6 +195,12 @@ public class InspectionService {
             throw new RuntimeException("该挡块尚未绑定产线，绑定上线后才能进行班次点检打卡");
         }
 
+        // 本次提交是否属于“不可用挡块自身的复检”：其最近一次结论为本班次不可用
+        BlockInspection before = getLatest(block.getId());
+        boolean recheckOfPending = before != null
+                && BlockInspection.RESULT_UNUSABLE.equals(before.getResult())
+                && dto.getShiftCode().equals(before.getShiftCode());
+
         BlockInspection inspection = new BlockInspection();
         inspection.setBlockId(block.getId());
         inspection.setInspectionTime(dto.getInspectionTime() != null ? dto.getInspectionTime() : LocalDateTime.now());
@@ -157,7 +208,66 @@ public class InspectionService {
         inspection.setInspector(dto.getInspector().trim());
         inspection.setResult(dto.getResult());
         inspection.setNote(dto.getNote() != null && !dto.getNote().isBlank() ? dto.getNote().trim() : null);
-        return inspectionRepository.saveAndFlush(inspection);
+        inspection = inspectionRepository.saveAndFlush(inspection);
+
+        // 以落库后的最新状态重新计算本产线该班次仍未复检通过的挡块
+        InspectionPendingRecheckVO pending = pendingOnLine(binding.getLineId(), dto.getShiftCode());
+        if (pending.getCount() > 0 && !recheckOfPending) {
+            // 普通点检提交被拦截：回滚本次落库，返回结构化明细
+            throw new InspectionPendingRecheckException(buildBlockMessage(pending), pending);
+        }
+
+        InspectionCheckInResult result = new InspectionCheckInResult();
+        result.setInspection(inspection);
+        result.setPendingRecheck(pending.getCount() > 0 ? pending : null);
+        return result;
+    }
+
+    /**
+     * 统计某产线某班次“不可用且尚未复检通过”的在用挡块：
+     * 当前绑定在该产线、在用、且最近一次点检为本班次不可用。编号按挡块编号排序。
+     */
+    private InspectionPendingRecheckVO pendingOnLine(Long lineId, String shiftCode) {
+        List<BlockLineBinding> bindings = bindingRepository.findByLineIdAndIsCurrent(lineId, 1);
+        List<BufferBlock> peerBlocks = new ArrayList<>();
+        for (BlockLineBinding peerBinding : bindings) {
+            blockRepository.findById(peerBinding.getBlockId()).ifPresent(peer -> {
+                if (BufferBlock.STATUS_IN_SERVICE.equals(peer.getServiceStatus())) {
+                    peerBlocks.add(peer);
+                }
+            });
+        }
+        Map<Long, BlockInspection> latestMap = latestMapOfBlocks(peerBlocks);
+        List<String> codes = new ArrayList<>();
+        for (BufferBlock peer : peerBlocks) {
+            BlockInspection latest = latestMap.get(peer.getId());
+            if (latest != null
+                    && BlockInspection.RESULT_UNUSABLE.equals(latest.getResult())
+                    && shiftCode.equals(latest.getShiftCode())) {
+                codes.add(peer.getBlockCode());
+            }
+        }
+        codes.sort(String::compareTo);
+
+        InspectionPendingRecheckVO vo = new InspectionPendingRecheckVO();
+        vo.setCount(codes.size());
+        vo.setShiftCode(shiftCode);
+        vo.setShiftName(shiftName(shiftCode));
+        vo.setLineId(lineId);
+        ProductionLine line = productionLineService.getById(lineId);
+        if (line != null) {
+            vo.setLineName(line.getLineName());
+        }
+        vo.setBlockCodes(codes);
+        return vo;
+    }
+
+    private String buildBlockMessage(InspectionPendingRecheckVO pending) {
+        String lineText = pending.getLineName() != null ? pending.getLineName() : "本产线";
+        return String.format(
+                "%1$s%2$s已有 %3$d 块挡块点检结论为不可用且尚未复检通过（%4$s），"
+                        + "请先对这些挡块复检通过后再提交其他点检。",
+                lineText, pending.getShiftName(), pending.getCount(), String.join("、", pending.getBlockCodes()));
     }
 
     private void validate(InspectionCreateDTO dto) {
@@ -236,6 +346,7 @@ public class InspectionService {
             vo.setLastInspector(latest.getInspector());
             vo.setLastResult(latest.getResult());
             vo.setLastNote(latest.getNote());
+            vo.setPendingRecheck(BlockInspection.RESULT_UNUSABLE.equals(latest.getResult()));
         } else {
             vo.setNeverInspected(true);
         }
@@ -290,5 +401,39 @@ public class InspectionService {
         return BlockInspection.SHIFT_MORNING.equals(shiftCode)
                 || BlockInspection.SHIFT_AFTERNOON.equals(shiftCode)
                 || BlockInspection.SHIFT_NIGHT.equals(shiftCode);
+    }
+
+    /** 班次编码转中文名 */
+    public static String shiftName(String shiftCode) {
+        return switch (shiftCode == null ? "" : shiftCode) {
+            case BlockInspection.SHIFT_MORNING -> "早班";
+            case BlockInspection.SHIFT_AFTERNOON -> "中班";
+            case BlockInspection.SHIFT_NIGHT -> "晚班";
+            default -> shiftCode;
+        };
+    }
+
+    /** 班次排序：早 → 中 → 晚，未知班次排最后 */
+    private static int shiftOrder(String shiftCode) {
+        return switch (shiftCode == null ? "" : shiftCode) {
+            case BlockInspection.SHIFT_MORNING -> 0;
+            case BlockInspection.SHIFT_AFTERNOON -> 1;
+            case BlockInspection.SHIFT_NIGHT -> 2;
+            default -> 3;
+        };
+    }
+
+    /** 点检打卡结果：落库记录 + 本产线该班次仍未复检通过的挡块清单（无则 null） */
+    public static class InspectionCheckInResult {
+        private BlockInspection inspection;
+        private InspectionPendingRecheckVO pendingRecheck;
+
+        public BlockInspection getInspection() { return inspection; }
+        public void setInspection(BlockInspection inspection) { this.inspection = inspection; }
+
+        public InspectionPendingRecheckVO getPendingRecheck() { return pendingRecheck; }
+        public void setPendingRecheck(InspectionPendingRecheckVO pendingRecheck) {
+            this.pendingRecheck = pendingRecheck;
+        }
     }
 }

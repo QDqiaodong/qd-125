@@ -17,8 +17,17 @@ public class InspectionOverviewVO {
     private int unusableCount;
     /** 从未点检的条数 */
     private int neverInspectedCount;
+    /**
+     * 待复检通过条数：产线范围内最近一次点检结论仍为“不可用”的在用挡块数量，
+     * 只按产线范围派生（不受班次/结论/关键字筛选影响），等于 pendingRecheckItems.size()，
+     * 与提交拦截清单同源于已落库记录，刷新后条数与提示对得上。
+     */
+    private int pendingRecheckCount;
 
     private List<InspectionItemVO> items = new ArrayList<>();
+
+    /** 待复检通过挡块明细（条数 = pendingRecheckCount，按班次/产线/编号排序） */
+    private List<InspectionPendingRecheckItemVO> pendingRecheckItems = new ArrayList<>();
 
     public InspectionOverviewVO() {
     }
@@ -35,6 +44,14 @@ public class InspectionOverviewVO {
     public int getNeverInspectedCount() { return neverInspectedCount; }
     public void setNeverInspectedCount(int neverInspectedCount) { this.neverInspectedCount = neverInspectedCount; }
 
+    public int getPendingRecheckCount() { return pendingRecheckCount; }
+    public void setPendingRecheckCount(int pendingRecheckCount) { this.pendingRecheckCount = pendingRecheckCount; }
+
     public List<InspectionItemVO> getItems() { return items; }
     public void setItems(List<InspectionItemVO> items) { this.items = items; }
+
+    public List<InspectionPendingRecheckItemVO> getPendingRecheckItems() { return pendingRecheckItems; }
+    public void setPendingRecheckItems(List<InspectionPendingRecheckItemVO> pendingRecheckItems) {
+        this.pendingRecheckItems = pendingRecheckItems;
+    }
 }

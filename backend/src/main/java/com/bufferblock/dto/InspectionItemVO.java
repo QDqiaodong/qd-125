@@ -28,6 +28,8 @@ public class InspectionItemVO {
     private String lastNote;
     /** 是否从未点检 */
     private boolean neverInspected;
+    /** 是否“不可用且尚未复检通过”（最近一次点检结论为不可用） */
+    private boolean pendingRecheck;
 
     public InspectionItemVO() {
     }
@@ -70,4 +72,7 @@ public class InspectionItemVO {
 
     public boolean isNeverInspected() { return neverInspected; }
     public void setNeverInspected(boolean neverInspected) { this.neverInspected = neverInspected; }
+
+    public boolean isPendingRecheck() { return pendingRecheck; }
+    public void setPendingRecheck(boolean pendingRecheck) { this.pendingRecheck = pendingRecheck; }
 }

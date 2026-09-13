@@ -7,7 +7,6 @@ import com.bufferblock.dto.Result;
 import com.bufferblock.entity.BlockInspection;
 import com.bufferblock.service.InspectionService;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 
 /**
@@ -42,9 +41,13 @@ public class InspectionController {
         return Result.success(inspectionService.getHistory(blockId));
     }
 
-    /** 班次点检打卡：登记点检人、班次与是否可用 */
+    /**
+     * 班次点检打卡：登记点检人、班次与是否可用。
+     * 本产线该班次存在尚未复检通过的不可用挡块时返回 4091 及挡块编号明细；
+     * 复检打卡成功时 data.pendingRecheck 可能携带仍未复检通过的其他挡块清单。
+     */
     @PostMapping
-    public Result<BlockInspection> createInspection(@RequestBody InspectionCreateDTO dto) {
+    public Result<InspectionService.InspectionCheckInResult> createInspection(@RequestBody InspectionCreateDTO dto) {
         return Result.success(inspectionService.createInspection(dto));
     }
 }

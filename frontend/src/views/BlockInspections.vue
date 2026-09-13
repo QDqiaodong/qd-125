@@ -20,6 +20,30 @@
         title="按产线筛选当前在用挡块（选车间含其下全部产线），逐块登记点检人、班次（早/中/晚班）与是否可用；最近一次点检结论实时显示在行内，刷新或重进页面后条数与列表保持一致。"
       />
 
+      <!-- 待复检通过提示：本产线范围内结论为不可用且尚未复检通过的挡块，条数与下方清单同源 -->
+      <el-alert
+        v-if="overview.pendingRecheckCount > 0"
+        class="tip-bar pending-bar"
+        type="error"
+        :closable="false"
+        show-icon
+        :title="`本产线范围内有 ${overview.pendingRecheckCount} 块挡块点检结论为不可用且尚未复检通过，请逐块复检打卡（可用）后再提交其他点检`"
+      >
+        <div class="pending-list">
+          <div v-for="group in pendingRecheckGroups" :key="group.key" class="pending-group">
+            <span class="pending-group-title">{{ group.title }}（{{ group.items.length }}）：</span>
+            <el-tag
+              v-for="item in group.items"
+              :key="item.blockId"
+              type="danger"
+              effect="plain"
+              size="small"
+              class="pending-tag"
+            >{{ item.blockCode }}</el-tag>
+          </div>
+        </div>
+      </el-alert>
+
       <div class="filter-bar">
         <el-tree-select
           v-model="query.lineId"
@@ -83,6 +107,11 @@
           <span class="count-num never">{{ overview.neverInspectedCount }}</span>
           <span class="count-label">从未点检</span>
         </div>
+        <el-divider direction="vertical" />
+        <div class="count-item">
+          <span class="count-num pending">{{ overview.pendingRecheckCount }}</span>
+          <span class="count-label">待复检通过</span>
+        </div>
         <div class="count-tip">条数与下方列表同源统计（服务端实时派生，已全部落库）</div>
       </div>
 
@@ -101,10 +130,19 @@
         <el-table-column prop="adapterModel" label="适配输送机型" min-width="150" show-overflow-tooltip />
         <el-table-column prop="thickness" label="厚度(mm)" width="100" align="center" />
         <el-table-column prop="lineName" label="当前所属产线" min-width="150" show-overflow-tooltip />
-        <el-table-column label="最近一次点检结论" width="130" align="center">
+        <el-table-column label="最近一次点检结论" width="160" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.lastResult === 'USABLE'" type="success" effect="dark">可用</el-tag>
-            <el-tag v-else-if="scope.row.lastResult === 'UNUSABLE'" type="danger" effect="dark">不可用</el-tag>
+            <template v-else-if="scope.row.lastResult === 'UNUSABLE'">
+              <el-tag type="danger" effect="dark">不可用</el-tag>
+              <el-tag
+                v-if="scope.row.pendingRecheck"
+                type="warning"
+                effect="dark"
+                size="small"
+                class="recheck-tag"
+              >待复检</el-tag>
+            </template>
             <el-tag v-else type="info">未点检</el-tag>
           </template>
         </el-table-column>
@@ -167,6 +205,15 @@
           </el-tag>
         </el-descriptions-item>
       </el-descriptions>
+
+      <el-alert
+        v-if="currentRow && currentRow.pendingRecheck"
+        class="recheck-alert"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="该挡块上次点检结论为不可用，本次属于复检打卡，提交后优先放行；复检结论为“可用”即移出待复检清单。"
+      />
 
       <el-form
         ref="checkFormRef"
@@ -240,15 +287,47 @@
         </el-table-column>
       </el-table>
     </el-drawer>
+
+    <!-- 提交被拦截：逐条列出待复检挡块编号，而不是一句笼统失败 -->
+    <el-dialog
+      v-model="blockedVisible"
+      title="点检提交被拦截"
+      width="560px"
+    >
+      <el-result
+        icon="warning"
+        title="本产线该班次尚有挡块未复检通过"
+        :sub-title="blockedDetail ? blockedLineShiftText : ''"
+      />
+      <div v-if="blockedDetail" class="blocked-body">
+        <div class="blocked-count">
+          共 <b>{{ blockedDetail.count }}</b> 块挡块结论为不可用且尚未复检通过，请先逐块复检打卡（可用）：
+        </div>
+        <div class="blocked-codes">
+          <el-tag
+            v-for="code in blockedDetail.blockCodes"
+            :key="code"
+            type="danger"
+            effect="plain"
+            size="large"
+            class="blocked-code-tag"
+          >{{ code }}</el-tag>
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="blockedVisible = false">我知道了，先去复检</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { getLineTree } from '@/api/line'
 import { getInspectionOverview, createInspection, getBlockInspections } from '@/api/inspection'
+import { BIZ_CODE_INSPECTION_PENDING_RECHECK } from '@/utils/request'
 import dayjs from 'dayjs'
 
 const shiftOptions = [
@@ -270,7 +349,9 @@ const overview = ref({
   usableCount: 0,
   unusableCount: 0,
   neverInspectedCount: 0,
-  items: []
+  pendingRecheckCount: 0,
+  items: [],
+  pendingRecheckItems: []
 })
 
 const checkDialogVisible = ref(false)
@@ -283,6 +364,10 @@ const historyVisible = ref(false)
 const historyLoading = ref(false)
 const historyBlock = ref(null)
 const historyList = ref([])
+
+// 提交拦截明细（条数 + 挡块编号清单），弹窗逐条展示
+const blockedVisible = ref(false)
+const blockedDetail = ref(null)
 
 function defaultForm() {
   return {
@@ -309,6 +394,32 @@ const shiftText = (code) => {
 
 const rowClassName = ({ row }) => (row.lastResult === 'UNUSABLE' ? 'inspection-unusable-row' : '')
 
+// 待复检清单按“班次 + 产线”分组展示，服务端已按班次/产线/编号排序
+const pendingRecheckGroups = computed(() => {
+  const groups = []
+  const indexByKey = new Map()
+  for (const item of overview.value.pendingRecheckItems || []) {
+    const shift = item.shiftName || shiftText(item.shiftCode)
+    const title = `${shift} · ${item.lineName || '未绑定产线'}`
+    const key = `${item.shiftCode}#${item.lineId ?? 'none'}`
+    let group = indexByKey.has(key) ? groups[indexByKey.get(key)] : null
+    if (!group) {
+      group = { key, title, items: [] }
+      indexByKey.set(key, groups.length)
+      groups.push(group)
+    }
+    group.items.push(item)
+  }
+  return groups
+})
+
+// 拦截弹窗副标题：产线 + 班次
+const blockedLineShiftText = computed(() => {
+  const d = blockedDetail.value
+  if (!d) return ''
+  return `${d.lineName || '本产线'} · ${d.shiftName || shiftText(d.shiftCode)}班`
+})
+
 const buildQuery = () => ({
   lineId: query.value.lineId || null,
   shiftCode: query.value.shiftCode || null,
@@ -326,7 +437,10 @@ const loadOverview = async () => {
       usableCount: data.usableCount || 0,
       unusableCount: data.unusableCount || 0,
       neverInspectedCount: data.neverInspectedCount || 0,
-      items: data.items || []
+      pendingRecheckCount: data.pendingRecheckCount || (data.pendingRecheckItems || []).length,
+      items: data.items || [],
+      // 待复检清单只按产线范围派生，不受班次/结论/关键字筛选影响
+      pendingRecheckItems: data.pendingRecheckItems || []
     }
   } catch (e) {
     // request interceptor already shows the error
@@ -344,6 +458,11 @@ const openCheckDialog = (row) => {
   currentRow.value = row
   checkForm.value = defaultForm()
   checkForm.value.blockId = row.blockId
+  // 复检不可用挡块时，默认带出上次班次并预选“可用”，便于复检通过
+  if (row.pendingRecheck) {
+    checkForm.value.shiftCode = row.lastShiftCode || ''
+    checkForm.value.result = 'USABLE'
+  }
   checkDialogVisible.value = true
 }
 
@@ -358,12 +477,23 @@ const submitCheck = async () => {
     if (!valid) return
     submitting.value = true
     try {
-      await createInspection({ ...checkForm.value })
-      ElMessage.success('点检打卡成功')
+      const res = await createInspection({ ...checkForm.value })
+      // 复检已落库；若同班次还有其他挡块未复检通过，给出剩余清单提示
+      const remaining = res?.pendingRecheck
+      if (remaining && remaining.count > 0) {
+        ElMessage.warning(`复检已提交，该班次仍有 ${remaining.count} 块挡块未复检通过：${remaining.blockCodes.join('、')}`)
+      } else {
+        ElMessage.success('点检打卡成功')
+      }
       checkDialogVisible.value = false
       await loadOverview()
     } catch (e) {
-      // keep dialog open so the operator can correct the input
+      if (e.code === BIZ_CODE_INSPECTION_PENDING_RECHECK && e.detail) {
+        // 结构化拦截：弹窗逐条列出挡块编号，提交未落库
+        blockedDetail.value = e.detail
+        blockedVisible.value = true
+      }
+      // 其他错误由请求拦截器统一提示；弹窗保持打开便于修改
     } finally {
       submitting.value = false
     }
@@ -421,6 +551,7 @@ onMounted(async () => {
 .count-num.usable { color: #67c23a; }
 .count-num.unusable { color: #f56c6c; }
 .count-num.never { color: #909399; }
+.count-num.pending { color: #e6a23c; }
 .count-label {
   color: #606266;
   font-size: 13px;
@@ -442,6 +573,54 @@ onMounted(async () => {
 }
 .check-form {
   margin-top: 4px;
+}
+.recheck-tag {
+  margin-left: 6px;
+}
+.recheck-alert {
+  margin-bottom: 12px;
+}
+.pending-bar {
+  margin-bottom: 14px;
+}
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.pending-group-title {
+  color: #606266;
+  font-size: 13px;
+}
+.pending-tag {
+  margin: 0 6px 4px 0;
+}
+.blocked-body {
+  padding: 0 12px 8px;
+}
+.blocked-count {
+  color: #606266;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.blocked-count b {
+  color: #f56c6c;
+  font-size: 16px;
+}
+.blocked-codes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px;
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 4px;
+}
+.blocked-code-tag {
+  font-size: 14px;
 }
 .history-head {
   display: flex;

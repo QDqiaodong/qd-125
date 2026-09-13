@@ -4,10 +4,13 @@ import com.bufferblock.dto.BufferBlockDTO;
 import com.bufferblock.dto.InspectionCreateDTO;
 import com.bufferblock.dto.InspectionItemVO;
 import com.bufferblock.dto.InspectionOverviewVO;
+import com.bufferblock.dto.InspectionPendingRecheckItemVO;
+import com.bufferblock.dto.InspectionPendingRecheckVO;
 import com.bufferblock.dto.InspectionQueryDTO;
 import com.bufferblock.entity.BlockInspection;
 import com.bufferblock.entity.BufferBlock;
 import com.bufferblock.entity.ProductionLine;
+import com.bufferblock.exception.InspectionPendingRecheckException;
 import com.bufferblock.repository.BlockInspectionRepository;
 import com.bufferblock.repository.BlockLineBindingRepository;
 import com.bufferblock.repository.BufferBlockRepository;
@@ -209,8 +212,128 @@ class InspectionServiceTest {
     }
 
     @Test
-    void blockArchiveCarriesLatestInspectionResult() {
-        BufferBlock block = createBoundBlock("BLK-INSP-AR", lineA1.getId());
+    void submissionBlockedWhenLineShiftHasUnrecheckedUnusableBlocks() {
+        BufferBlock bad = createBoundBlock("BLK-INSP-B1", lineA1.getId());
+        BufferBlock other = createBoundBlock("BLK-INSP-B2", lineA1.getId());
+        BufferBlock otherLine = createBoundBlock("BLK-INSP-B3", lineA2.getId());
+
+        // 早班：bad 打卡不可用
+        checkIn(bad.getId(), "MORNING", "UNUSABLE", "点检人乙", LocalDateTime.now(), "卡滞");
+
+        // 同产线同班次提交其他挡块 -> 被拦截，明细逐条列出挡块编号，本次提交不落库
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        checkIn(other.getId(), "MORNING", "USABLE", "点检人甲", LocalDateTime.now(), null))
+                .isInstanceOf(InspectionPendingRecheckException.class)
+                .hasMessageContaining("BLK-INSP-B1")
+                .satisfies(ex -> {
+                    InspectionPendingRecheckVO detail =
+                            (InspectionPendingRecheckVO) ((InspectionPendingRecheckException) ex).getDetail();
+                    assertThat(detail.getCount()).isEqualTo(1);
+                    assertThat(detail.getBlockCodes()).containsExactly("BLK-INSP-B1");
+                    assertThat(detail.getLineId()).isEqualTo(lineA1.getId());
+                    assertThat(detail.getShiftCode()).isEqualTo("MORNING");
+                });
+        // 拦截后未落库：other 仍为从未点检
+        assertThat(inspectionService.getLatest(other.getId())).isNull();
+
+        // 其他产线同班次不受影响
+        checkIn(otherLine.getId(), "MORNING", "USABLE", "点检人丙", LocalDateTime.now(), null);
+        assertThat(inspectionService.getLatest(otherLine.getId()).getResult()).isEqualTo("USABLE");
+
+        // 同产线其他班次也不受影响
+        checkIn(other.getId(), "AFTERNOON", "USABLE", "点检人甲", LocalDateTime.now(), null);
+        assertThat(inspectionService.getLatest(other.getId()).getResult()).isEqualTo("USABLE");
+    }
+
+    @Test
+    void recheckClearsBlockAndSubmissionPassesAfterwards() {
+        BufferBlock bad1 = createBoundBlock("BLK-INSP-R1", lineA1.getId());
+        BufferBlock bad2 = createBoundBlock("BLK-INSP-R2", lineA1.getId());
+        BufferBlock good = createBoundBlock("BLK-INSP-R3", lineA1.getId());
+
+        checkIn(bad1.getId(), "MORNING", "UNUSABLE", "点检人乙", LocalDateTime.now(), "异常1");
+        checkIn(bad2.getId(), "MORNING", "UNUSABLE", "点检人乙", LocalDateTime.now(), "异常2");
+
+        // 此时普通提交被拦截，明细列出 2 块
+        assertThatThrownBy(() -> checkIn(good.getId(), "MORNING", "USABLE", "点检人甲",
+                LocalDateTime.now(), null))
+                .isInstanceOf(InspectionPendingRecheckException.class)
+                .satisfies(ex -> {
+                    InspectionPendingRecheckVO detail =
+                            (InspectionPendingRecheckVO) ((InspectionPendingRecheckException) ex).getDetail();
+                    assertThat(detail.getCount()).isEqualTo(2);
+                    assertThat(detail.getBlockCodes())
+                            .containsExactly("BLK-INSP-R1", "BLK-INSP-R2");
+                });
+
+        // 对不可用挡块自身复检（可用）允许落库，并返回仍未复检通过的另一块
+        InspectionService.InspectionCheckInResult firstRecheck =
+                recheck(bad1.getId(), "MORNING", "USABLE", "复检人甲");
+        assertThat(firstRecheck.getInspection().getResult()).isEqualTo("USABLE");
+        assertThat(firstRecheck.getPendingRecheck()).isNotNull();
+        assertThat(firstRecheck.getPendingRecheck().getCount()).isEqualTo(1);
+        assertThat(firstRecheck.getPendingRecheck().getBlockCodes()).containsExactly("BLK-INSP-R2");
+
+        // 只剩一块时普通提交仍被拦截
+        assertThatThrownBy(() -> checkIn(good.getId(), "MORNING", "USABLE", "点检人甲",
+                LocalDateTime.now(), null))
+                .isInstanceOf(InspectionPendingRecheckException.class);
+
+        // 第二块复检通过后再提交应能通过，且不再有待复检清单
+        InspectionService.InspectionCheckInResult secondRecheck =
+                recheck(bad2.getId(), "MORNING", "USABLE", "复检人甲");
+        assertThat(secondRecheck.getPendingRecheck()).isNull();
+        InspectionService.InspectionCheckInResult normal =
+                submitResult(good.getId(), "MORNING", "USABLE", "点检人甲");
+        assertThat(normal.getPendingRecheck()).isNull();
+        assertThat(inspectionService.getLatest(good.getId()).getResult()).isEqualTo("USABLE");
+
+        // 复检通过后最近结论派生为可用，概览不可用/待复检条数归零，刷新两次口径一致
+        for (int i = 0; i < 2; i++) {
+            InspectionOverviewVO overview = inspectionService.getOverview(new InspectionQueryDTO());
+            assertThat(overview.getUnusableCount()).isZero();
+            assertThat(overview.getUsableCount()).isEqualTo(3);
+            assertThat(overview.getPendingRecheckCount()).isZero();
+            assertThat(overview.getPendingRecheckItems()).isEmpty();
+        }
+    }
+
+    @Test
+    void pendingRecheckCountMatchesCodesAcrossReload() {
+        BufferBlock morningBad = createBoundBlock("BLK-INSP-P1", lineA1.getId());
+        BufferBlock nightBad = createBoundBlock("BLK-INSP-P2", lineA1.getId());
+        BufferBlock workshopOther = createBoundBlock("BLK-INSP-P3", lineB1.getId());
+
+        checkIn(morningBad.getId(), "MORNING", "UNUSABLE", "点检人乙", LocalDateTime.now(), null);
+        checkIn(nightBad.getId(), "NIGHT", "UNUSABLE", "点检人丙", LocalDateTime.now(), null);
+
+        // 概览待复检条数与明细编号一致（不随班次/结论筛选变化），刷新后仍然一致
+        for (int i = 0; i < 2; i++) {
+            InspectionOverviewVO overview = inspectionService.getOverview(new InspectionQueryDTO());
+            assertThat(overview.getPendingRecheckCount()).isEqualTo(2);
+            assertThat(overview.getPendingRecheckItems()).hasSize(2);
+            assertThat(overview.getPendingRecheckItems()).extracting(InspectionPendingRecheckItemVO::getBlockCode)
+                    .containsExactly("BLK-INSP-P1", "BLK-INSP-P2");
+            // 行内待复检标记与结论同源
+            InspectionItemVO morningRow = overview.getItems().stream()
+                    .filter(item -> item.getBlockId().equals(morningBad.getId())).findFirst().orElseThrow();
+            assertThat(morningRow.isPendingRecheck()).isTrue();
+
+            // 按班次筛选不改变待复检口径
+            InspectionQueryDTO nightQuery = new InspectionQueryDTO();
+            nightQuery.setShiftCode("NIGHT");
+            assertThat(inspectionService.getOverview(nightQuery).getPendingRecheckCount()).isEqualTo(2);
+        }
+
+        // 只看 B 车间时待复检清单为空，且该范围提交不受 A 车间不可用挡块影响
+        InspectionQueryDTO workshopBQuery = new InspectionQueryDTO();
+        workshopBQuery.setLineId(workshopB.getId());
+        assertThat(inspectionService.getOverview(workshopBQuery).getPendingRecheckCount()).isZero();
+        checkIn(workshopOther.getId(), "MORNING", "USABLE", "点检人甲", LocalDateTime.now(), null);
+    }
+
+    @Test
+    void blockArchiveCarriesLatestInspectionResult() {        BufferBlock block = createBoundBlock("BLK-INSP-AR", lineA1.getId());
         assertThat(bufferBlockService.getById(block.getId()).getLastInspectionResult()).isNull();
 
         checkIn(block.getId(), "MORNING", "USABLE", "点检人甲", LocalDateTime.now().minusHours(5), null);
@@ -267,6 +390,22 @@ class InspectionServiceTest {
         dto.setInspectionTime(time);
         dto.setNote(note);
         inspectionService.createInspection(dto);
+    }
+
+    /** 复检/提交并返回完整结果（含仍未复检通过的挡块清单） */
+    private InspectionService.InspectionCheckInResult submitResult(Long blockId, String shift, String result,
+                                                                   String inspector) {
+        InspectionCreateDTO dto = dto(blockId);
+        dto.setShiftCode(shift);
+        dto.setResult(result);
+        dto.setInspector(inspector);
+        dto.setInspectionTime(LocalDateTime.now());
+        return inspectionService.createInspection(dto);
+    }
+
+    private InspectionService.InspectionCheckInResult recheck(Long blockId, String shift, String result,
+                                                               String inspector) {
+        return submitResult(blockId, shift, result, inspector);
     }
 
     private InspectionCreateDTO dto(Long blockId) {

@@ -1,6 +1,7 @@
 package com.bufferblock.config;
 
 import com.bufferblock.dto.Result;
+import com.bufferblock.exception.InspectionPendingRecheckException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -36,6 +37,19 @@ public class GlobalExceptionHandler {
     public Result<Void> handleRuntimeException(RuntimeException e) {
         log.warn("业务处理异常: {}", e.getMessage());
         return Result.error(e.getMessage() != null ? e.getMessage() : "系统繁忙，请稍后重试");
+    }
+
+    /**
+     * 点检提交被“本产线该班次存在尚未复检通过的不可用挡块”拦截：
+     * 返回专用错误码与结构化明细（条数 + 挡块编号清单），前端逐条展示。
+     */
+    @ExceptionHandler(InspectionPendingRecheckException.class)
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public Result<?> handleInspectionPendingRecheck(InspectionPendingRecheckException e) {
+        log.warn("点检提交被待复检挡块拦截: {}", e.getMessage());
+        return Result.inspectionPendingRecheck(
+                e.getMessage() != null ? e.getMessage() : "本产线该班次尚有未复检通过的不可用挡块",
+                e.getDetail());
     }
 
     @ExceptionHandler(Exception.class)

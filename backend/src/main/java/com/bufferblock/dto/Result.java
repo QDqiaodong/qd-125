@@ -35,4 +35,13 @@ public class Result<T> {
         result.setMessage(message);
         return result;
     }
+
+    /** 点检提交被待复检挡块拦截：专用错误码 + 结构化明细（条数/编号清单） */
+    public static <T> Result<T> inspectionPendingRecheck(String message, T data) {
+        Result<T> result = new Result<>();
+        result.setCode(4091);
+        result.setMessage(message);
+        result.setData(data);
+        return result;
+    }
 }
