@@ -4,8 +4,9 @@
 -- 存量部署无需手动执行本脚本——新版后端启动时会通过
 -- ShiftHandoverSchemaMigration 自动完成等价的幂等迁移。
 --
--- 交班时一次性快照登记当班未还预约、待确认移交与待处理盘点差异，
--- 接班人逐条确认后交班才完成；交班未完成期间禁止新开借用预约。
+-- 交班时一次性快照登记当班未还预约、待确认移交、待处理盘点差异与拦截中点检工装，
+-- 接班人逐条确认后交班才完成（仍拦截中的工装须校准合格移出拦截后才能确认）；
+-- 交班未完成期间禁止新开借用预约。
 -- ====================================================================
 
 USE buffer_block_db;
@@ -32,9 +33,9 @@ CREATE TABLE IF NOT EXISTS shift_handover (
 CREATE TABLE IF NOT EXISTS shift_handover_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     handover_id BIGINT NOT NULL COMMENT '交班单ID',
-    item_type VARCHAR(30) NOT NULL COMMENT '事项类型: BORROW_UNRETURNED-未还预约, TRANSFER_PENDING-待确认移交, STOCKTAKE_PENDING-待处理盘点差异',
-    ref_id BIGINT DEFAULT NULL COMMENT '源单据ID快照(预约单/移交单/盘点明细)',
-    ref_no VARCHAR(50) DEFAULT NULL COMMENT '源单号快照',
+    item_type VARCHAR(30) NOT NULL COMMENT '事项类型: BORROW_UNRETURNED-未还预约, TRANSFER_PENDING-待确认移交, STOCKTAKE_PENDING-待处理盘点差异, GAUGE_BLOCKED-拦截中点检工装',
+    ref_id BIGINT DEFAULT NULL COMMENT '源单据ID快照(预约单/移交单/盘点明细/工装台账)',
+    ref_no VARCHAR(50) DEFAULT NULL COMMENT '源单号快照(BR-/TRF-/PD-/工装编号)',
     block_id BIGINT DEFAULT NULL COMMENT '挡块ID快照',
     block_code VARCHAR(50) DEFAULT NULL COMMENT '挡块编号快照',
     summary VARCHAR(500) DEFAULT NULL COMMENT '事项摘要快照',

@@ -18,6 +18,8 @@ public class HandoverOverviewVO {
     private Integer totalCount = 0;
     private Integer confirmedCount = 0;
     private Integer unconfirmedCount = 0;
+    /** 未确认拦截中点检工装件数（与校准台拦截条数同一派生口径，刷新后必然对得上） */
+    private Integer unconfirmedGaugeCount = 0;
     private LocalDateTime createTime;
 
     public HandoverOverviewVO() {
@@ -46,6 +48,9 @@ public class HandoverOverviewVO {
 
     public Integer getUnconfirmedCount() { return unconfirmedCount; }
     public void setUnconfirmedCount(Integer unconfirmedCount) { this.unconfirmedCount = unconfirmedCount; }
+
+    public Integer getUnconfirmedGaugeCount() { return unconfirmedGaugeCount; }
+    public void setUnconfirmedGaugeCount(Integer unconfirmedGaugeCount) { this.unconfirmedGaugeCount = unconfirmedGaugeCount; }
 
     public LocalDateTime getCreateTime() { return createTime; }
     public void setCreateTime(LocalDateTime createTime) { this.createTime = createTime; }

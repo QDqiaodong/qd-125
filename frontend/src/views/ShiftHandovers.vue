@@ -14,7 +14,13 @@
           交班进行中：{{ overview.handoverNo }}（{{ overview.fromTeam }} → {{ overview.toTeam }}），
           共 {{ overview.totalCount }} 项，还剩
           <span class="banner-count">{{ overview.unconfirmedCount }}</span>
-          项待接班人逐条确认；交班完成前禁止新开借用预约
+          项待接班人逐条确认
+          <template v-if="overview.unconfirmedGaugeCount > 0">
+            （含拦截中工装
+            <span class="banner-count">{{ overview.unconfirmedGaugeCount }}</span>
+            件，须校准合格后方可确认）
+          </template>
+          ；交班完成前禁止新开借用预约
           <el-button type="warning" size="small" plain class="banner-btn" @click="openDetailById(overview.handoverId)">
             前往确认
           </el-button>
@@ -47,23 +53,31 @@
             <div class="mini-value primary handover-no">{{ overview.inProgress ? overview.handoverNo : '无' }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <div class="mini-stat">
             <div class="mini-label">事项总数</div>
             <div class="mini-value primary">{{ overview.inProgress ? overview.totalCount : 0 }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <div class="mini-stat">
             <div class="mini-label">已确认</div>
             <div class="mini-value success">{{ overview.inProgress ? overview.confirmedCount : 0 }}</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <div class="mini-stat">
             <div class="mini-label">未确认</div>
             <div class="mini-value" :class="overview.inProgress && overview.unconfirmedCount > 0 ? 'danger' : 'success'">
               {{ overview.inProgress ? overview.unconfirmedCount : 0 }}
+            </div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="mini-stat">
+            <div class="mini-label">未确认工装（与校准台拦截同源）</div>
+            <div class="mini-value" :class="overview.inProgress && overview.unconfirmedGaugeCount > 0 ? 'danger' : 'success'">
+              {{ overview.inProgress ? overview.unconfirmedGaugeCount : 0 }}
             </div>
           </div>
         </el-col>
@@ -102,7 +116,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="交班时一次性登记当班全部未还预约、待确认移交与待处理盘点差异；接班人须逐条确认，全部确认后交班才完成；交班未完成期间禁止新开借用预约；清单与未确认条数全部落库，关闭页面再打开保持一致。"
+        title="交班时一次性登记当班全部未还预约、待确认移交、待处理盘点差异与当前拦截中的点检工装；接班人须逐条确认（工装须确认编号与拦截原因，仍拦截中的工装须校准合格移出拦截后才能确认），全部确认后交班才完成；交班未完成期间禁止新开借用预约；清单与未确认条数全部落库，未确认工装条数与校准台拦截条数同源，刷新页面后保持一致。"
       />
 
       <el-table :data="tableData" stripe v-loading="loading" row-key="id">
@@ -172,33 +186,39 @@
       </div>
     </div>
 
-    <!-- 发起交班：预览将一次性登记的三类未结事项 -->
+    <!-- 发起交班：预览将一次性登记的四类未结事项 -->
     <el-dialog v-model="createVisible" title="发起班组交班" width="780px" @close="resetCreateForm">
       <el-alert
         type="warning"
         :closable="false"
         show-icon
-        title="提交后以下事项将一次性快照登记为交班清单，接班人须逐条确认；交班完成前禁止新开借用预约。"
+        title="提交后以下事项（含当前拦截中的点检工装）将一次性快照登记为交班清单，接班人须逐条确认；交班完成前禁止新开借用预约。"
         class="create-alert"
       />
       <div v-loading="previewLoading">
         <el-row :gutter="12" class="preview-stat">
-          <el-col :span="8">
+          <el-col :span="6">
             <div class="mini-stat">
               <div class="mini-label">未还预约</div>
               <div class="mini-value danger">{{ preview.borrowCount }}</div>
             </div>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <div class="mini-stat">
               <div class="mini-label">待确认移交</div>
               <div class="mini-value warning">{{ preview.transferCount }}</div>
             </div>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <div class="mini-stat">
               <div class="mini-label">待处理盘点差异</div>
               <div class="mini-value primary">{{ preview.stocktakeCount }}</div>
+            </div>
+          </el-col>
+          <el-col :span="6">
+            <div class="mini-stat">
+              <div class="mini-label">拦截中工装</div>
+              <div class="mini-value danger">{{ preview.gaugeCount }}</div>
             </div>
           </el-col>
         </el-row>
@@ -210,7 +230,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="refNo" label="源单号" width="160" show-overflow-tooltip />
+          <el-table-column prop="refNo" label="源单号/工装编号" width="160" show-overflow-tooltip />
           <el-table-column prop="blockCode" label="挡块编号" width="120" show-overflow-tooltip>
             <template #default="scope">{{ scope.row.blockCode || '-' }}</template>
           </el-table-column>
@@ -277,6 +297,15 @@
           />
         </div>
 
+        <el-alert
+          v-if="blockedGaugeItems.length > 0"
+          class="gauge-alert"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="`有 ${blockedGaugeItems.length} 件点检工装仍拦截中（${blockedGaugeItems.map(i => i.refNo).join('、')}），须先在工装校准台校准合格移出拦截清单，接班人才能确认该条`"
+        />
+
         <el-table :data="items" size="small" border v-loading="itemsLoading" max-height="380">
           <el-table-column type="index" label="序号" width="55" align="center" />
           <el-table-column label="类型" width="130" align="center">
@@ -286,7 +315,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="refNo" label="源单号" width="160" show-overflow-tooltip>
+          <el-table-column prop="refNo" label="源单号/工装编号" width="160" show-overflow-tooltip>
             <template #default="scope">{{ scope.row.refNo || '-' }}</template>
           </el-table-column>
           <el-table-column prop="blockCode" label="挡块编号" width="115" show-overflow-tooltip>
@@ -315,8 +344,20 @@
           </el-table-column>
           <el-table-column v-if="currentHandover.status === 'IN_PROGRESS'" label="操作" width="100" fixed="right" align="center">
             <template #default="scope">
+              <el-tooltip
+                v-if="scope.row.status === 'PENDING' && scope.row.itemType === 'GAUGE_BLOCKED' && scope.row.sourceStillOpen"
+                effect="dark"
+                placement="top"
+                content="工装仍拦截中，须校准合格移出拦截清单后才能确认"
+              >
+                <span>
+                  <el-button size="small" type="warning" link disabled>
+                    <el-icon><CircleCheck /></el-icon>确认
+                  </el-button>
+                </span>
+              </el-tooltip>
               <el-button
-                v-if="scope.row.status === 'PENDING'"
+                v-else-if="scope.row.status === 'PENDING'"
                 size="small"
                 type="warning"
                 link
@@ -384,7 +425,8 @@ const overview = ref({
   toTeam: '',
   totalCount: 0,
   confirmedCount: 0,
-  unconfirmedCount: 0
+  unconfirmedCount: 0,
+  unconfirmedGaugeCount: 0
 })
 
 const query = reactive({ status: '', handoverNo: '', page: 1, size: 10 })
@@ -395,7 +437,8 @@ const itemTypeMeta = (type) => {
   const map = {
     BORROW_UNRETURNED: { text: '未还预约', type: 'danger' },
     TRANSFER_PENDING: { text: '待确认移交', type: 'warning' },
-    STOCKTAKE_PENDING: { text: '待处理盘点差异', type: 'primary' }
+    STOCKTAKE_PENDING: { text: '待处理盘点差异', type: 'primary' },
+    GAUGE_BLOCKED: { text: '拦截中工装', type: 'danger' }
   }
   return map[type] || { text: type || '-', type: 'info' }
 }
@@ -447,7 +490,7 @@ const handleReset = () => {
 const createVisible = ref(false)
 const previewLoading = ref(false)
 const createFormRef = ref(null)
-const preview = ref({ items: [], borrowCount: 0, transferCount: 0, stocktakeCount: 0 })
+const preview = ref({ items: [], borrowCount: 0, transferCount: 0, stocktakeCount: 0, gaugeCount: 0 })
 const defaultCreateForm = () => ({
   fromTeam: '',
   toTeam: '',
@@ -471,7 +514,7 @@ const openCreateDialog = async () => {
   try {
     preview.value = await getHandoverPreview()
   } catch (e) {
-    preview.value = { items: [], borrowCount: 0, transferCount: 0, stocktakeCount: 0 }
+    preview.value = { items: [], borrowCount: 0, transferCount: 0, stocktakeCount: 0, gaugeCount: 0 }
   } finally {
     previewLoading.value = false
   }
@@ -510,6 +553,11 @@ const confirmPercent = computed(() => {
   if (!currentHandover.value || !currentHandover.value.totalCount) return 0
   return Math.round((currentHandover.value.confirmedCount / currentHandover.value.totalCount) * 100)
 })
+
+// 仍拦截中的工装事项（与校准台拦截清单同源）：须校准合格移出拦截后才能确认
+const blockedGaugeItems = computed(() =>
+  items.value.filter(i => i.itemType === 'GAUGE_BLOCKED' && i.status === 'PENDING' && i.sourceStillOpen)
+)
 
 const openDetail = async (row) => {
   await openDetailById(row.id)
@@ -676,6 +724,9 @@ onMounted(loadData)
 }
 .progress-bar {
   flex: 1;
+}
+.gauge-alert {
+  margin-bottom: 12px;
 }
 .confirm-target {
   display: flex;

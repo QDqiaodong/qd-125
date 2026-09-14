@@ -43,7 +43,7 @@
       <template #title>
         <div class="overdue-title">
           <el-icon><SwitchButton /></el-icon>
-          班组交班未完成（{{ handover.handoverNo }}，还剩 {{ handover.unconfirmedCount }} 项待接班人确认），完成前禁止新开借用预约
+          班组交班未完成（{{ handover.handoverNo }}，还剩 {{ handover.unconfirmedCount }} 项待接班人确认<template v-if="handover.unconfirmedGaugeCount > 0">，含拦截中工装 {{ handover.unconfirmedGaugeCount }} 件</template>），完成前禁止新开借用预约
         </div>
       </template>
     </el-alert>
@@ -584,7 +584,7 @@ const leafLines = ref([])
 
 const overview = ref({ reservedCount: 0, pickedUpCount: 0, overdueCount: 0, overdueReturnCount: 0, activeCount: 0 })
 // 班组交班状态：交班未完成时禁止新开预约（后端同样拦截，前后端口径一致）
-const handover = ref({ inProgress: false, handoverNo: '', unconfirmedCount: 0 })
+const handover = ref({ inProgress: false, handoverNo: '', unconfirmedCount: 0, unconfirmedGaugeCount: 0 })
 
 const query = reactive({ status: '', teamName: '', blockCode: '', page: 1, size: 10 })
 

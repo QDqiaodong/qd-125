@@ -7,9 +7,11 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 
 /**
- * 班组交班事项：交班登记瞬间对三类未结事项（未还预约/待确认移交/待处理盘点差异）
+ * 班组交班事项：交班登记瞬间对四类未结事项（未还预约/待确认移交/待处理盘点差异/拦截中点检工装）
  * 做的快照，清单内容随后续业务变化保持不变（可审计）；接班人逐条确认，
  * 确认人/确认时间随状态落库，关闭页面再打开清单与未确认条数保持一致。
+ * 拦截中工装事项与校准台拦截清单同一派生口径：交班中新拦截的工装自动补入清单，
+ * 仍拦截中的工装须校准合格移出拦截后才能由接班人确认。
  */
 @Entity
 @Table(name = "shift_handover_item")
@@ -21,6 +23,8 @@ public class ShiftHandoverItem {
     public static final String TYPE_TRANSFER_PENDING = "TRANSFER_PENDING";
     /** 事项类型：待处理盘点差异 */
     public static final String TYPE_STOCKTAKE_PENDING = "STOCKTAKE_PENDING";
+    /** 事项类型：拦截中点检工装（到期未校准/校准结论不合格，与校准台拦截清单同源） */
+    public static final String TYPE_GAUGE_BLOCKED = "GAUGE_BLOCKED";
 
     /** 待接班确认 */
     public static final String STATUS_PENDING = "PENDING";
@@ -37,11 +41,11 @@ public class ShiftHandoverItem {
     @Column(name = "item_type", nullable = false, length = 30)
     private String itemType;
 
-    /** 源单据ID快照：预约单ID / 移交单ID / 盘点明细ID */
+    /** 源单据ID快照：预约单ID / 移交单ID / 盘点明细ID / 工装台账ID */
     @Column(name = "ref_id")
     private Long refId;
 
-    /** 源单号快照：BR-... / TRF-... / PD-... */
+    /** 源单号快照：BR-... / TRF-... / PD-... / 工装编号 */
     @Column(name = "ref_no", length = 50)
     private String refNo;
 

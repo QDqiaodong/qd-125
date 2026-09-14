@@ -15,8 +15,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * 班组交班：交班时一次性登记当班未还预约、待确认移交与待处理盘点差异，
- * 接班人逐条确认后交班才完成；交班未完成期间禁止新开借用预约。
+ * 班组交班：交班时一次性登记当班未还预约、待确认移交、待处理盘点差异与拦截中点检工装，
+ * 接班人逐条确认后交班才完成（仍拦截中的工装须校准合格移出拦截后才能确认）；
+ * 交班未完成期间禁止新开借用预约。
  */
 @RestController
 @RequestMapping("/api/shift-handovers")
@@ -39,7 +40,7 @@ public class ShiftHandoverController {
         return Result.success(shiftHandoverService.overview());
     }
 
-    /** 登记前预览：当前将被一次性登记的三类未结事项 */
+    /** 登记前预览：当前将被一次性登记的四类未结事项（含拦截中点检工装） */
     @GetMapping("/preview")
     public Result<HandoverPreviewVO> preview() {
         return Result.success(shiftHandoverService.preview());

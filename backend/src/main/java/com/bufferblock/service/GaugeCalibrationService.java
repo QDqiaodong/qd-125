@@ -231,6 +231,25 @@ public class GaugeCalibrationService {
         }
     }
 
+    /**
+     * 按工装ID批量取实时派生状态（与校准台台账、拦截清单同一 {@link #toItemVO} 派生口径），
+     * 供班组交班事项同源展示工装当前是否仍拦截中；不存在的工装ID不出现在返回Map中。
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, GaugeToolItemVO> getToolStatusMap(List<Long> toolIds) {
+        if (toolIds == null || toolIds.isEmpty()) {
+            return Map.of();
+        }
+        List<GaugeTool> tools = toolRepository.findAllById(toolIds);
+        Map<Long, GaugeCalibration> latestMap = latestCalibrationMap(tools);
+        LocalDate today = LocalDate.now();
+        Map<Long, GaugeToolItemVO> result = new HashMap<>();
+        for (GaugeTool tool : tools) {
+            result.put(tool.getId(), toItemVO(tool, latestMap.get(tool.getId()), today));
+        }
+        return result;
+    }
+
     private String buildBlockedMessage(GaugeBlockedVO blocked) {
         List<String> overdueCodes = blocked.getItems().stream()
                 .filter(i -> REASON_OVERDUE.equals(i.getBlockedReason()))
@@ -459,6 +478,15 @@ public class GaugeCalibrationService {
             case GaugeTool.TYPE_FEELER -> "塞尺";
             case GaugeTool.TYPE_DIAL_INDICATOR -> "百分表";
             default -> type;
+        };
+    }
+
+    /** 拦截原因编码转中文名 */
+    public static String reasonText(String reason) {
+        return switch (reason == null ? "" : reason) {
+            case REASON_OVERDUE -> "到期未校准";
+            case REASON_FAIL -> "校准结论不合格";
+            default -> reason == null ? "-" : reason;
         };
     }
 }

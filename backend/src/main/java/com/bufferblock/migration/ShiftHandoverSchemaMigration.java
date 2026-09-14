@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * Web 服务接受请求前自动补齐结构。本迁移幂等可重复执行：</p>
  * <ol>
  *     <li>创建班组交班主表 shift_handover（交班中/已完成、事项总数与已确认计数冗余）；</li>
- *     <li>创建交班事项表 shift_handover_item（三类未结事项快照 + 接班人逐条确认落库）；</li>
+ *     <li>创建交班事项表 shift_handover_item（四类未结事项快照（含拦截中点检工装） + 接班人逐条确认落库）；</li>
  *     <li>创建交班单号发号器表 shift_handover_sequence 并初始化 LOCK 行。</li>
  * </ol>
  *
@@ -85,9 +85,9 @@ public class ShiftHandoverSchemaMigration {
                     "CREATE TABLE shift_handover_item (" +
                     "    id BIGINT AUTO_INCREMENT PRIMARY KEY," +
                     "    handover_id BIGINT NOT NULL COMMENT '交班单ID'," +
-                    "    item_type VARCHAR(30) NOT NULL COMMENT '事项类型: BORROW_UNRETURNED-未还预约, TRANSFER_PENDING-待确认移交, STOCKTAKE_PENDING-待处理盘点差异'," +
-                    "    ref_id BIGINT DEFAULT NULL COMMENT '源单据ID快照(预约单/移交单/盘点明细)'," +
-                    "    ref_no VARCHAR(50) DEFAULT NULL COMMENT '源单号快照'," +
+                    "    item_type VARCHAR(30) NOT NULL COMMENT '事项类型: BORROW_UNRETURNED-未还预约, TRANSFER_PENDING-待确认移交, STOCKTAKE_PENDING-待处理盘点差异, GAUGE_BLOCKED-拦截中点检工装'," +
+                    "    ref_id BIGINT DEFAULT NULL COMMENT '源单据ID快照(预约单/移交单/盘点明细/工装台账)'," +
+                    "    ref_no VARCHAR(50) DEFAULT NULL COMMENT '源单号快照(BR-/TRF-/PD-/工装编号)'," +
                     "    block_id BIGINT DEFAULT NULL COMMENT '挡块ID快照'," +
                     "    block_code VARCHAR(50) DEFAULT NULL COMMENT '挡块编号快照'," +
                     "    summary VARCHAR(500) DEFAULT NULL COMMENT '事项摘要快照'," +

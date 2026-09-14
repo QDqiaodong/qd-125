@@ -5,8 +5,8 @@ import com.bufferblock.entity.ShiftHandoverItem;
 import java.util.List;
 
 /**
- * 交班登记预览：提交前展示当前将被一次性登记的三类未结事项
- * （未还预约/待确认移交/待处理盘点差异），内容即正式登记时的快照口径。
+ * 交班登记预览：提交前展示当前将被一次性登记的四类未结事项
+ * （未还预约/待确认移交/待处理盘点差异/拦截中点检工装），内容即正式登记时的快照口径。
  */
 public class HandoverPreviewVO {
 
@@ -18,6 +18,8 @@ public class HandoverPreviewVO {
     private long transferCount;
     /** 待处理盘点差异条数 */
     private long stocktakeCount;
+    /** 拦截中点检工装条数（与校准台拦截条数同源） */
+    private long gaugeCount;
 
     public HandoverPreviewVO() {
     }
@@ -33,4 +35,7 @@ public class HandoverPreviewVO {
 
     public long getStocktakeCount() { return stocktakeCount; }
     public void setStocktakeCount(long stocktakeCount) { this.stocktakeCount = stocktakeCount; }
+
+    public long getGaugeCount() { return gaugeCount; }
+    public void setGaugeCount(long gaugeCount) { this.gaugeCount = gaugeCount; }
 }

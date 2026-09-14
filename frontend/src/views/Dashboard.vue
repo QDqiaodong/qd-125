@@ -111,13 +111,13 @@
             <el-icon :size="26" :color="handover.inProgress ? '#e6a23c' : '#67c23a'"><SwitchButton /></el-icon>
             <div>
               <div class="pending-title">班组交班</div>
-              <div class="pending-desc">交班一次性登记未还预约、待确认移交与待处理盘点差异，接班人逐条确认后完成；交班未完成时禁止新开借用预约</div>
+              <div class="pending-desc">交班一次性登记未还预约、待确认移交、待处理盘点差异与拦截中点检工装，接班人逐条确认后完成；交班未完成时禁止新开借用预约</div>
             </div>
           </div>
           <div class="pending-right">
             <template v-if="handover.inProgress">
               <span class="handover-count">{{ handover.unconfirmedCount }}</span>
-              <span class="pending-unit">项待接班确认 ·</span>
+              <span class="pending-unit">项待接班确认<template v-if="handover.unconfirmedGaugeCount > 0">（含拦截中工装 {{ handover.unconfirmedGaugeCount }} 件）</template> ·</span>
               <span class="pending-unit">{{ handover.handoverNo }}</span>
               <el-button type="warning" plain size="small">前往确认</el-button>
             </template>
@@ -215,7 +215,7 @@
                 <li>等待时长、流转记录与确认回执打印</li>
                 <li>挡块盘点差异闭环：缺失/错线/重复/盘盈自动标记与处理追溯</li>
                 <li>挡块借用预约：空闲挡块预约取用/归还点，占用档案标记“已约出”，取消必写原因，到点未取自动提醒</li>
-                <li>班组交班：一次性登记未还预约/待确认移交/待处理盘点差异，接班人逐条确认，交班未完成禁止新开预约</li>
+                <li>班组交班：一次性登记未还预约/待确认移交/待处理盘点差异/拦截中点检工装，接班人逐条确认，交班未完成禁止新开预约</li>
                 <li>挡块校准：临期窗口提醒与待办清单，逾期/挂起禁止移交，临期移交须二次确认</li>
               </ul>
             </el-descriptions-item>
@@ -281,7 +281,8 @@ const borrow = ref({
 const handover = ref({
   inProgress: false,
   handoverNo: '',
-  unconfirmedCount: 0
+  unconfirmedCount: 0,
+  unconfirmedGaugeCount: 0
 })
 
 const dueSoon = ref({

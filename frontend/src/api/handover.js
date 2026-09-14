@@ -17,7 +17,7 @@ export function getHandoverOverview() {
   })
 }
 
-/** 登记前预览：当前将被一次性登记的三类未结事项 */
+/** 登记前预览：当前将被一次性登记的四类未结事项（含拦截中点检工装） */
 export function getHandoverPreview() {
   return request({
     url: '/shift-handovers/preview',
