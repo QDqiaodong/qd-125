@@ -8,6 +8,7 @@ import com.bufferblock.dto.HandoverCreateDTO;
 import com.bufferblock.dto.HandoverItemConfirmDTO;
 import com.bufferblock.dto.HandoverOverviewVO;
 import com.bufferblock.dto.HandoverPreviewVO;
+import com.bufferblock.dto.GaugeToolItemVO;
 import com.bufferblock.entity.BlockBorrowReservation;
 import com.bufferblock.entity.BlockBorrowSequence;
 import com.bufferblock.entity.BlockTransfer;
@@ -20,6 +21,7 @@ import com.bufferblock.entity.ShiftHandoverItem;
 import com.bufferblock.entity.ShiftHandoverSequence;
 import com.bufferblock.entity.StocktakeBatch;
 import com.bufferblock.entity.StocktakeItem;
+import com.bufferblock.exception.HandoverGaugeStillBlockedException;
 import com.bufferblock.repository.BlockBorrowFlowRecordRepository;
 import com.bufferblock.repository.BlockBorrowReservationRepository;
 import com.bufferblock.repository.BlockBorrowSequenceRepository;
@@ -47,6 +49,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * 班组交班全链路：一次性快照登记四类未结事项（未还预约/待确认移交/待处理盘点差异/拦截中点检工装）、
@@ -354,10 +357,16 @@ class ShiftHandoverServiceTest {
         ShiftHandover handover = shiftHandoverService.create(createDto());
         ShiftHandoverItem gaugeItem = shiftHandoverService.getItems(handover.getId()).get(0);
 
-        // 工装仍拦截中：接班人不能确认该条
-        assertThatThrownBy(() -> confirm(handover.getId(), gaugeItem.getId()))
+        // 工装仍拦截中：接班人不能确认该条；异常携带结构化明细（编号/类型/保管班组/拦截原因），
+        // 前端弹窗逐条展示，编号与原因不会被界面吞掉
+        Throwable thrown = catchThrowable(() -> confirm(handover.getId(), gaugeItem.getId()));
+        assertThat(thrown).isInstanceOf(HandoverGaugeStillBlockedException.class)
                 .hasMessageContaining("仍在拦截中")
                 .hasMessageContaining("KC-HO-3");
+        GaugeToolItemVO detail = (GaugeToolItemVO) ((HandoverGaugeStillBlockedException) thrown).getDetail();
+        assertThat(detail.getToolCode()).isEqualTo("KC-HO-3");
+        assertThat(detail.isBlocked()).isTrue();
+        assertThat(detail.getBlockedReason()).isEqualTo(GaugeCalibrationService.REASON_OVERDUE);
         assertThat(shiftHandoverService.getById(handover.getId()).getStatus())
                 .isEqualTo(ShiftHandover.STATUS_IN_PROGRESS);
 

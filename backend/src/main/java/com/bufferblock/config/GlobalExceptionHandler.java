@@ -2,6 +2,7 @@ package com.bufferblock.config;
 
 import com.bufferblock.dto.Result;
 import com.bufferblock.exception.GaugeCalibrationBlockedException;
+import com.bufferblock.exception.HandoverGaugeStillBlockedException;
 import com.bufferblock.exception.InspectionPendingRecheckException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,6 +64,19 @@ public class GlobalExceptionHandler {
         log.warn("班次点检打卡被超期/不合格工装拦截: {}", e.getMessage());
         return Result.gaugeCalibrationBlocked(
                 e.getMessage() != null ? e.getMessage() : "存在到期未校准或校准不合格的点检工装",
+                e.getDetail());
+    }
+
+    /**
+     * 交班确认拦截中工装事项时，该工装仍在校准台拦截清单（到期未校准/校准结论不合格）：
+     * 返回专用错误码与结构化明细（工装编号/类型/保管班组/拦截原因），前端弹窗逐条列出。
+     */
+    @ExceptionHandler(HandoverGaugeStillBlockedException.class)
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public Result<?> handleHandoverGaugeStillBlocked(HandoverGaugeStillBlockedException e) {
+        log.warn("交班工装事项确认被仍拦截中的工装拒绝: {}", e.getMessage());
+        return Result.handoverGaugeStillBlocked(
+                e.getMessage() != null ? e.getMessage() : "该点检工装仍在拦截中，请先校准合格移出拦截清单",
                 e.getDetail());
     }
 

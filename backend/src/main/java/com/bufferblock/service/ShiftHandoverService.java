@@ -15,6 +15,7 @@ import com.bufferblock.entity.ShiftHandover;
 import com.bufferblock.entity.ShiftHandoverItem;
 import com.bufferblock.entity.StocktakeBatch;
 import com.bufferblock.entity.StocktakeItem;
+import com.bufferblock.exception.HandoverGaugeStillBlockedException;
 import com.bufferblock.repository.BlockBorrowReservationRepository;
 import com.bufferblock.repository.BlockTransferRepository;
 import com.bufferblock.repository.BufferBlockRepository;
@@ -300,7 +301,9 @@ public class ShiftHandoverService {
 
     /**
      * 拦截中工装确认闸门：工装仍拦截中（到期未校准/校准结论不合格）时拒绝确认，
-     * 须先在工装校准台处理至移出拦截清单；已移出拦截（校准合格/停用）的工装可正常确认。
+     * 抛出携带结构化明细（编号/类型/保管班组/拦截原因）的专用异常，
+     * 前端弹窗逐条列出而非笼统失败；须先在工装校准台处理至移出拦截清单；
+     * 已移出拦截（校准合格/停用）的工装可正常确认。
      */
     private void assertGaugeItemConfirmable(ShiftHandoverItem item) {
         if (!ShiftHandoverItem.TYPE_GAUGE_BLOCKED.equals(item.getItemType()) || item.getRefId() == null) {
@@ -309,9 +312,10 @@ public class ShiftHandoverService {
         GaugeToolItemVO gauge = gaugeCalibrationService.getToolStatusMap(List.of(item.getRefId()))
                 .get(item.getRefId());
         if (gauge != null && gauge.isBlocked()) {
-            throw new RuntimeException("工装 " + item.getRefNo() + " 仍在拦截中（"
-                    + GaugeCalibrationService.reasonText(gauge.getBlockedReason())
-                    + "），请先在工装校准台校准合格移出拦截清单后，再由接班人确认");
+            String reason = GaugeCalibrationService.reasonText(gauge.getBlockedReason());
+            String message = "工装 " + item.getRefNo() + " 仍在拦截中（" + reason
+                    + "），请先在工装校准台校准合格移出拦截清单后，再由接班人确认";
+            throw new HandoverGaugeStillBlockedException(message, gauge);
         }
     }
 

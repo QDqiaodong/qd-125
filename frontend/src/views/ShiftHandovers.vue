@@ -395,11 +395,69 @@
         <el-button type="warning" :loading="submitting" @click="submitConfirm">确认该事项</el-button>
       </template>
     </el-dialog>
+
+    <!-- 确认被拒：工装仍在拦截中，弹窗明示编号与拦截原因 -->
+    <el-dialog
+      v-model="gaugeBlockedVisible"
+      title="该工装仍在拦截中，暂不能确认"
+      width="560px"
+    >
+      <el-result
+        icon="warning"
+        title="点检工装尚未移出拦截清单"
+        sub-title="请先到工装校准台校准合格（或停用）移出拦截清单后，再由接班人确认该条事项"
+      />
+      <div v-if="gaugeBlockedDetail" class="gauge-blocked-detail">
+        <el-descriptions :column="1" border size="small">
+          <el-descriptions-item label="工装编号">
+            <el-tag type="danger" effect="plain" size="small">{{ gaugeBlockedDetail.toolCode }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="工装类型">
+            {{ gaugeBlockedDetail.toolTypeName || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="保管班组">
+            {{ gaugeBlockedDetail.keeperTeam || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="拦截原因">
+            <el-tag
+              :type="gaugeBlockedDetail.blockedReason === 'OVERDUE' ? 'danger' : 'warning'"
+              effect="dark"
+              size="small"
+            >
+              {{ gaugeBlockedReasonText }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="gaugeBlockedDetail.blockedReason === 'FAIL'
+            && gaugeBlockedDetail.lastCalibrationDate" label="最近校准">
+            {{ formatDate(gaugeBlockedDetail.lastCalibrationDate) }} 不合格
+            <template v-if="gaugeBlockedDetail.lastCalibrator">
+              （校准人：{{ gaugeBlockedDetail.lastCalibrator }}）
+            </template>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <el-alert
+        v-else-if="gaugeBlockedMessage"
+        class="gauge-blocked-msg"
+        type="error"
+        :closable="false"
+        show-icon
+        :title="gaugeBlockedMessage"
+      />
+      <div class="gauge-blocked-tip">
+        本次确认未落库，该条仍为「待确认」；详情已刷新，未确认条数与校准台拦截清单重新对账。
+      </div>
+      <template #footer>
+        <el-button @click="gaugeBlockedVisible = false">我知道了</el-button>
+        <el-button type="primary" @click="goGaugeCalibration">前往工装校准台</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import {
@@ -411,6 +469,9 @@ import {
   getHandoverItems,
   confirmHandoverItem
 } from '@/api/handover'
+import { BIZ_CODE_HANDOVER_GAUGE_STILL_BLOCKED } from '@/utils/request'
+
+const router = useRouter()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -432,6 +493,7 @@ const overview = ref({
 const query = reactive({ status: '', handoverNo: '', page: 1, size: 10 })
 
 const formatTime = (t) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-')
+const formatDate = (d) => (d ? dayjs(d).format('YYYY-MM-DD') : '-')
 
 const itemTypeMeta = (type) => {
   const map = {
@@ -627,11 +689,49 @@ const submitConfirm = async () => {
       }
       await Promise.all([reloadDetail(), loadData()])
     } catch (e) {
-      // ignore
+      if (e.code === BIZ_CODE_HANDOVER_GAUGE_STILL_BLOCKED) {
+        // 工装仍拦截中：后端返回结构化明细（编号/类型/保管班组/拦截原因），
+        // 关闭确认弹窗并弹出拦截原因，接班人核对编号后须先到校准台处理
+        confirmVisible.value = false
+        gaugeBlockedDetail.value = e.detail || null
+        gaugeBlockedMessage.value = e.message || ''
+        gaugeBlockedVisible.value = true
+        // 失败未落库：刷新详情与概览，与校准台拦截清单重新对账，
+        // 保证顶部提示、行内“待确认/拦截中”状态和未确认条数对得上
+        await Promise.all([reloadDetail(), loadData()])
+      }
+      // 其他错误由请求拦截器统一提示；确认弹窗保持打开便于修改
     } finally {
       submitting.value = false
     }
   })
+}
+
+// 确认被“工装仍拦截中”拒绝：明细弹窗（与点检打卡工装拦截同款）
+const gaugeBlockedVisible = ref(false)
+const gaugeBlockedDetail = ref(null)
+const gaugeBlockedMessage = ref('')
+
+// 拦截原因展示文本（OVERDUE 含到期日与超期天数，FAIL 含最近校准信息）
+const gaugeBlockedReasonText = computed(() => {
+  const g = gaugeBlockedDetail.value
+  if (!g) return gaugeBlockedMessage.value || ''
+  if (g.blockedReason === 'OVERDUE') {
+    let text = `到期未校准（到期日 ${formatDate(g.calibrationDueDate)}）`
+    if (g.overdueDays != null) {
+      text += `，已超期 ${g.overdueDays} 天`
+    }
+    return text
+  }
+  if (g.blockedReason === 'FAIL') {
+    return '校准结论不合格'
+  }
+  return gaugeBlockedMessage.value || '该工装仍在拦截中'
+})
+
+const goGaugeCalibration = () => {
+  gaugeBlockedVisible.value = false
+  router.push('/gauge-calibration')
 }
 
 onMounted(loadData)
@@ -748,5 +848,17 @@ onMounted(loadData)
 .muted {
   color: #909399;
   font-size: 12px;
+}
+.gauge-blocked-detail {
+  margin: 4px 0 12px;
+}
+.gauge-blocked-msg {
+  margin: 4px 0 12px;
+}
+.gauge-blocked-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
+  padding: 0 4px;
 }
 </style>

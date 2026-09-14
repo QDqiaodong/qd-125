@@ -53,4 +53,13 @@ public class Result<T> {
         result.setData(data);
         return result;
     }
+
+    /** 交班确认被“仍拦截中点检工装”拦截：专用错误码 + 结构化明细（该工装编号/拦截原因） */
+    public static <T> Result<T> handoverGaugeStillBlocked(String message, T data) {
+        Result<T> result = new Result<>();
+        result.setCode(4093);
+        result.setMessage(message);
+        result.setData(data);
+        return result;
+    }
 }
